@@ -652,10 +652,10 @@ export const rod = (kind, a, b, r = 1.4) => ({ shape: 'rod', kind, a, b, r });
 export const pad = (kind, a, b, z, r = 3) => ({ shape: 'pad', kind, a: [a[0], a[1], 0], b: [b[0], b[1], 0], z, r });
 export const disc = (kind, c, radius, thick = 2) => ({ shape: 'disc', kind, c, radius, thick });
 export const sides = (make) => [make(1), make(-1)];
-export const dumbbells = (hand, grip = [0, 0, 1]) => [[hand, grip], [flip(hand), flip(grip)]].flatMap(([c, g]) => [
-  rod('steel', add(c, g, -9), add(c, g, 9), 1.2),
-  { shape: 'head', kind: 'load', a: add(c, g, 4.6), b: add(c, g, 10.2), r: 5 },
-  { shape: 'head', kind: 'load', a: add(c, g, -4.6), b: add(c, g, -10.2), r: 5 },
+export const dumbbells = (hand, grip = [0, 0, 1], size = 1) => [[hand, grip], [flip(hand), flip(grip)]].flatMap(([c, g]) => [
+  rod('steel', add(c, g, -9 * size), add(c, g, 9 * size), 1.2),
+  { shape: 'head', kind: 'load', a: add(c, g, 4.6), b: add(c, g, 10.2 * size), r: 5 * size },
+  { shape: 'head', kind: 'load', a: add(c, g, -4.6), b: add(c, g, -10.2 * size), r: 5 * size },
 ]);
 
 const GLOSS = { steel: 0.5, load: 0.25, pad: 0.06, cable: 0.1, rope: 0.02 };

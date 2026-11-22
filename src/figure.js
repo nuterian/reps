@@ -39,7 +39,8 @@ export function bend(a, b, la, lb, pole) {
 // pose: { hip, torso, curl, head, reach, lift, hand, elbow, ankle, knee, toe }
 // torso: lean of the lower spine in degrees. curl: how much further the upper
 // spine is bent. reach and lift move the shoulders forward and up. elbow and
-// knee are the directions those joints point. toe: direction of the foot.
+// knee are the directions those joints point. facing: where the outside of the
+// elbow faces, if not that way. toe: direction of the foot.
 export function solve(pose) {
   const { curl = 0, reach = 0, lift = 0, toe = 90 } = pose;
   const angles = [0, 0.5, 1].map((k) => pose.torso + curl * k);
@@ -60,7 +61,7 @@ export function solve(pose) {
     ankle: pose.ankle,
     elbow: bend(shoulder, hand, BONE.upper, BONE.fore, elbowWay),
     knee: bend(hip, pose.ankle, BONE.thigh, BONE.shin, pose.knee),
-    elbowWay: square(elbowWay, sub(hand, shoulder)),
+    elbowWay: pose.facing ?? square(elbowWay, sub(hand, shoulder)),
     kneeWay: square(pose.knee, sub(pose.ankle, hip)),
     toe: dir(toe),
     sole: dir(toe + 90),

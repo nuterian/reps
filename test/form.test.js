@@ -237,6 +237,22 @@ function inside({ v }, { base, rows, cols }, q) {
   return Math.abs(wraps) > 0.5;
 }
 
+// The parts of the body with those names, and the box each is in now, so that
+// most points need no closer look.
+function solids(m, names) {
+  return m.parts.filter((p) => names[p.cols] && !p.want).map((part) => {
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = part.base; i < part.base + part.rows * part.cols; i++) {
+      for (const a of [0, 1, 2]) {
+        lo[a] = Math.min(lo[a], m.v[i * STRIDE + a]);
+        hi[a] = Math.max(hi[a], m.v[i * STRIDE + a]);
+      }
+    }
+    return { name: names[part.cols], holds: (q) => q.every((n, a) => n > lo[a] && n < hi[a]) && inside(m, part, q) };
+  });
+}
+
 test('no cable or rope goes through the body', () => {
   // Parts by their points to a ring.
   const body = { 40: 'head', 38: 'hair', 22: 'arm', 24: 'leg', 36: 'torso' };
@@ -246,6 +262,7 @@ test('no cable or rope goes through the body', () => {
       const m = meshes[id](t);
       const j = solve(clip.pose(t));
       for (const cols of Object.keys(body)) assert.ok(m.parts.some((p) => p.cols === +cols), `the ${body[cols]} is found`);
+      const parts = solids(m, body);
       const hands = [j.hand, [j.hand[0], j.hand[1], -j.hand[2]]];
       for (const g of clip.gear(j, t)) {
         if (!['cable', 'rope'].includes(g.kind)) continue;
@@ -257,9 +274,7 @@ test('no cable or rope goes through the body', () => {
           if (hands.some((h) => dist(h, c) < 5)) continue; // the hand closes around it
           for (const [cos, sin] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
             const q = c.map((n, a) => n + (x[a] * cos + y[a] * sin) * g.r);
-            for (const part of m.parts) {
-              if (body[part.cols] && inside(m, part, q)) found.add(`${id}: the ${g.kind} is in the ${body[part.cols]} at ${t}`);
-            }
+            for (const p of parts) if (p.holds(q)) found.add(`${id}: the ${g.kind} is in the ${p.name} at ${t}`);
           }
         }
       }
@@ -411,4 +426,43 @@ test('a muscle is a sheet in its own place, not a tint on the skin', () => {
       assert.ok(colors.some((c) => dist(c, key) < 0.02), `${id}: the key for ${want} has the colour of the muscle`);
     }
   }
+});
+
+test('no weight goes into the body', () => {
+  const body = { 36: 'torso', 24: 'leg' };
+  const found = new Set();
+  for (const id of ['db-curl', 'rdl', 'db-shoulder-press', 'incline-db-press', 'chest-press', 'lat-pulldown']) {
+    for (const t of [0, 0.05, 0.125, 0.25, 0.5, 0.75, 1]) {
+      const m = meshes[id](t);
+      const j = solve(FORM[id].pose(t));
+      const bodies = solids(m, body);
+      const held = (g) => g.shape === 'rod' && dist(j.hand, mix(g.a, g.b, Math.min(1, Math.max(0, dot(sub(j.hand, g.a), sub(g.b, g.a)) / dot(sub(g.b, g.a), sub(g.b, g.a)))))) < 0.5;
+      for (const g of FORM[id].gear(j, t)) {
+        if (g.shape !== 'head' && !held(g)) continue;
+        const line = unit(sub(g.b, g.a));
+        const x = unit(cross(line, Math.abs(line[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]));
+        const y = cross(line, x);
+        // Along it every 1.5 units, at its rim and halfway in, so the ends are covered too.
+        const parts = Math.max(3, Math.ceil(dist(g.a, g.b) / 1.5));
+        for (let i = 0; i <= parts; i++) {
+          for (let k = 0; k < 16; k++) {
+            const a = (k / 8) * TAU;
+            const q = mix(g.a, g.b, i / parts).map((n, c) => n + (x[c] * Math.cos(a) + y[c] * Math.sin(a)) * g.r * (k < 8 ? 1 : 0.5));
+            for (const p of bodies) if (p.holds(q)) found.add(`${id}: the ${g.shape} is in the ${p.name} at ${t}`);
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual([...found], []);
+});
+
+test('the upper arm does not twist as a curl starts', () => {
+  const facing = TIMES.map((t) => {
+    const j = solve(FORM['db-curl'].pose(t));
+    const along = unit(sub(j.elbow, j.shoulder));
+    const f = sub([0, 0, 0], unit(sub(j.elbowWay, along.map((v) => v * dot(j.elbowWay, along)))));
+    return (Math.atan2(f[2], f[0]) * 180) / Math.PI; // 0 is biceps forward
+  });
+  for (const f of facing) near(f, 0, 5, 'biceps facing forward');
 });

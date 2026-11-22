@@ -210,7 +210,7 @@ export const FORM = {
       torso: mix(1, 63, t),
       head: mix(0, -18, t),
       hand: ({ shoulder }) => {
-        const x = mix(109, 107, t) + Math.sin(Math.PI * t);
+        const x = mix(111, 107, t) + Math.sin(Math.PI * t);
         const z = 18;
         return [x, shoulder[1] - Math.sqrt(45.6 ** 2 - (x - shoulder[0]) ** 2 - (z - shoulder[2]) ** 2), z];
       },
@@ -343,18 +343,20 @@ export const FORM = {
     ],
     // The elbow is fixed; only the forearm turns.
     pose: (t) => {
-      const way = add([0, 0, 0], [-0.03, -1, 0.16], 24 / len([-0.03, -1, 0.16]));
-      const forearm = add(dir(mix(170, 34, t)), [0, 0, 0.14]);
+      const way = add([0, 0, 0], [-0.03, -1, 0.2], 24 / len([-0.03, -1, 0.2]));
+      // With palms forward the forearms angle out, so the weights clear the thighs.
+      const forearm = add(dir(mix(170, 38, t)), [0, 0, mix(0.34, 0.2, t)]);
       return {
         hip: [99, 68.4],
         torso: 0,
         hand: ({ shoulder }) => add(add(shoulder, way), forearm, 22 / len(forearm)),
         elbow: () => way,
+        facing: [-1, 0, 0],
         ankle: [100, 5, 9],
         knee: [1, 0, 0.1],
       };
     },
     track: hands,
-    gear: (j) => dumbbells(j.hand),
+    gear: (j) => dumbbells(j.hand, [0, 0, 1], 0.9),
   },
 };
