@@ -498,6 +498,22 @@ async function main() {
       await p.waitForTimeout(90);
     }
     assert.deepEqual([...heard].sort(), ['Hold/', 'Lower/Slowly, breathe in', 'Push/Breathe out'], 'the words follow the rep');
+    // In a hold the figure still breathes: the picture changes between two moments of it.
+    const [early, late, word] = await p.evaluate(() => new Promise((done) => {
+      const canvas = document.querySelector('.clip canvas');
+      const say = document.querySelector('.say b');
+      let moved = false;
+      let first, since;
+      const look = (now) => {
+        if (say.textContent !== 'Hold') moved = true;
+        else if (moved && !first) [first, since] = [canvas.toDataURL(), now];
+        if (first && now - since > 250) return done([first, canvas.toDataURL(), say.textContent]);
+        requestAnimationFrame(look);
+      };
+      requestAnimationFrame(look);
+    }));
+    assert.equal(word, 'Hold');
+    assert.ok(early !== late, 'a held clip breathes');
     await p.waitForFunction(() => document.querySelector('.say b').textContent === 'Lower');
     const one = await picture();
     await p.waitForTimeout(500);

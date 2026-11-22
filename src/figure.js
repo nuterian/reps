@@ -40,23 +40,24 @@ export function bend(a, b, la, lb, pole) {
 // torso: lean of the lower spine in degrees. curl: how much further the upper
 // spine is bent. reach and lift move the shoulders forward and up. elbow and
 // knee are the directions those joints point. facing: where the outside of the
-// elbow faces, if not that way. toe: direction of the foot.
-export function solve(pose) {
+// elbow faces, if not that way. toe: direction of the foot. life: see alive().
+export function solve(pose, life = STILL) {
   const { curl = 0, reach = 0, lift = 0, toe = 90 } = pose;
+  const turn = (pose.head ?? 0) - life.strain;
   const angles = [0, 0.5, 1].map((k) => pose.torso + curl * k);
   const spine = [[...pose.hip, 0]];
   for (const a of angles) spine.push(add(spine[spine.length - 1], dir(a), BONE.spine));
   const top = angles[2];
   const front = angles.map((a) => dir(a + 90));
   const shoulder = add(add(add(spine[3], front[2], reach), dir(top), lift - 3.6), [0, 0, SHOULDER_Z]);
-  const headUp = dir(top + (pose.head ?? 0));
+  const headUp = dir(top + turn);
   const head = add(spine[3], headUp, BONE.neck);
   const hip = add(spine[0], [0, 0, HIP_Z]);
   const hand = typeof pose.hand === 'function' ? pose.hand({ shoulder, head, headUp, spine }) : pose.hand;
   const grip = typeof pose.grip === 'function' ? pose.grip({ hand }) : pose.grip ?? [0, 0, 1];
   const elbowWay = typeof pose.elbow === 'function' ? pose.elbow({ shoulder, hand, headUp }) : pose.elbow;
   return {
-    spine, angles, front, head, headUp, headTurn: pose.head ?? 0, shoulder, hip, hand,
+    spine, angles, front, head, headUp, headTurn: turn, shoulder, hip, hand, life,
     grip: unit(grip),
     ankle: pose.ankle,
     elbow: bend(shoulder, hand, BONE.upper, BONE.fore, elbowWay),
@@ -70,7 +71,8 @@ export function solve(pose) {
 
 // One repetition: lift in 1.2 s, lower in 2.4 s, a hold at each end. Returns
 // how far along the movement the clip is, and which part of the rep it is in:
-// 0 start hold, 1 going out, 2 end hold, 3 coming back.
+// 0 start hold, 1 going out, 2 end hold, 3 coming back. Held at the end of
+// the lift, the weight sinks a little and is caught.
 const HOLD = 0.7;
 const LIFT = 1.2;
 const LOWER = 2.4;
@@ -78,12 +80,35 @@ export const CYCLE = LIFT + LOWER + 2 * HOLD;
 export function phase(clip, seconds) {
   const [out, back] = clip.lowersFirst ? [LOWER, LIFT] : [LIFT, LOWER];
   const ease = (k) => (1 - Math.cos(Math.PI * k)) / 2;
+  const give = (k) => 0.006 * Math.sin(Math.PI * k) ** 2;
   let s = ((seconds % CYCLE) + CYCLE) % CYCLE;
   for (const [part, length] of [HOLD, out, HOLD, back].entries()) {
     if (s < length || part === 3) {
       const k = Math.min(1, s / length);
-      return { part, k, t: [0, ease(k), 1, ease(1 - k)][part] };
+      return { part, k, t: [clip.lowersFirst ? give(k) : 0, ease(k), clip.lowersFirst ? 1 : 1 - give(k), ease(1 - k)][part] };
     }
     s -= length;
   }
+}
+
+// What a living body does besides the movement: breath (0 empty, 1 full), how
+// hard the muscles work (0 to 1), strain (degrees the head is drawn back) and
+// blink (0 open, 1 shut). Out on the lift and in on the way down, as the words
+// under the clip say. Only the head moves: a trunk that sways is bad form.
+export const STILL = { breath: 0.5, effort: 0, strain: 0, blink: 0 };
+export const lifted = (clip, t) => (clip.lowersFirst ? 1 - t : t);
+export function alive(clip, seconds) {
+  const now = phase(clip, seconds);
+  const up = lifted(clip, now.t);
+  const swell = Math.sin(Math.PI * now.k) ** 2;
+  const driving = now.part === (clip.lowersFirst ? 3 : 1);
+  const held = now.part % 2 === 0;
+  const shut = ((seconds % 3.7) - 2.6) / 0.22;
+  return {
+    ...now,
+    breath: 1 - up + (held ? 0.25 * swell : 0),
+    effort: 0.7 * up + (driving ? 0.45 : held ? 0.12 : 0.2) * swell,
+    strain: (driving ? 3 : held ? 0.8 : 0) * swell,
+    blink: shut > 0 && shut < 1 ? Math.sin(Math.PI * shut) : 0,
+  };
 }

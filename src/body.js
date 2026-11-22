@@ -332,7 +332,10 @@ function torso(mesh, j) {
     const x = Math.min(2.5, Math.max(0.5, u)) - 0.5;
     const i = Math.min(1, Math.floor(x));
     const lean = u > 3 ? mix(angles[2], neckAngle, Math.min(1, u - 3)) : mix(angles[i], angles[i + 1], x - i);
-    return [c, dir(lean + 90), [0, 0, 1]];
+    // A breath fills the ribs to the front and the sides, and the belly a little.
+    const full = (j.life.breath - 0.5) * (0.045 * bump(u - 2.1, 0.7) + 0.03 * bump(u - 1, 0.5));
+    const front = dir(lean + 90);
+    return [add(c, front, 7 * full), front.map((x) => x * (1 + full)), [0, 0, 1 + 0.6 * full]];
   }, (u, a, r) => {
     if (r === 0 || r === TORSO_U.length - 1) return [0, 0, 0];
     const [w, f, b] = torsoR(u);
@@ -391,7 +394,7 @@ function onFace(y, z) {
 // What lies on the face, worked out for the first clip so launch does not pay
 // for it: rings of [x, y, z] from the middle of each patch to its edge.
 // An eye is an almond of white with an iris, almost flush with the skin.
-const EYE = { y: 0.45, z: 2.45, half: 1.15 };
+const EYE = { y: 0.45, z: 2.45, half: 1.15, lid: 0.15 };
 const almond = (z, up) => {
   const k = Math.min(1, Math.abs(z) / EYE.half);
   return (up ? 0.54 * (1 - k ** 2.4) : -0.4 * (1 - k ** 2)) + 0.06 * z;
@@ -437,6 +440,10 @@ function head(mesh, j) {
   const front = [up[1], -up[0], 0];
   // Every part is fixed to the head: point(u, angle, r) is [x, y, z].
   const part = (us, cols, point, paint) => sweep(mesh, us, cols, () => [at, front, up, [0, 0, 1]], point, paint);
+  // An eye shuts by closing up to its lower lid.
+  const lid = add(at, up, EYE.lid);
+  const open = up.map((x) => x * (1 - 0.93 * j.life.blink));
+  const eye = (us, cols, point, paint) => sweep(mesh, us, cols, () => [lid, front, open, [0, 0, 1]], (...a) => add(point(...a), [0, -EYE.lid, 0]), paint);
 
   part(FACE_U, 40, (u, a) => skull(u, faceward(a)), (u, a) => {
     const [x, y, z] = skull(u, faceward(a));
@@ -447,9 +454,9 @@ function head(mesh, j) {
   for (const s of [1, -1]) {
     eyes ??= drawEyes();
     const onSide = ([x, y, z]) => [x, y, z * s];
-    const lay = (rings, paint) => part([...rings.keys()], rings[0].length, (u, a, r) => onSide(rings[r][Math.round((a / TAU) * rings[0].length)]), paint);
+    const lay = (rings, paint) => eye([...rings.keys()], rings[0].length, (u, a, r) => onSide(rings[r][Math.round((a / TAU) * rings[0].length)]), paint);
     // A line along points of the face, thickest where full(k) is 1.
-    const line = (points, tall, deep, full, paint) => part(steps(0, 1, points.length), 8, (k, a, r) => {
+    const line = (where, points, tall, deep, full, paint) => where(steps(0, 1, points.length), 8, (k, a, r) => {
       const thick = r % (points.length - 1) ? full(k) : 0.02;
       const [x, y, z] = points[r];
       return onSide([x + deep * thick * Math.sin(a), y + tall * thick * Math.cos(a), z]);
@@ -457,8 +464,8 @@ function head(mesh, j) {
     // The white darkens under the lids, so the eye sits in the face.
     lay(eyes.white, (u) => [blend(C.white, C.skin, 0.55 * easeIn(u, 1, 3)), 0.1]);
     lay(eyes.iris, () => [C.iris, 0.06]);
-    line(eyes.lash, 0.1, 0.1, (k) => Math.sqrt(Math.sin(Math.PI * k)), [C.hair, 0]);
-    line(eyes.brow, 0.27, 0.11, (k) => Math.sqrt(Math.min(1, (1 - k) / 0.7, 0.4 + k / 0.3)), [blend(C.hair, C.skin, 0.2), 0]);
+    line(eye, eyes.lash, 0.1, 0.1, (k) => Math.sqrt(Math.sin(Math.PI * k)), [C.hair, 0]);
+    line(part, eyes.brow, 0.27, 0.11, (k) => Math.sqrt(Math.min(1, (1 - k) / 0.7, 0.4 + k / 0.3)), [blend(C.hair, C.skin, 0.2), 0]);
 
     // Ear: a thin shell inside a rim that curls round to the lobe.
     const shell = (a, r, lift) => [-1 + r * (Math.cos(a) * 1.25 - Math.sin(a) * 0.4), -0.4 + r * Math.sin(a) * 2.05, 5.1 + r * (0.55 - 0.65 * Math.cos(a)) + lift];
@@ -494,13 +501,13 @@ const spindle = (on, from, to, left, right, end = 0.4) => {
   const mid = (left + right) / 2;
   return { on, edges: [left, right].map((e) => [[0, end], [0.12, 0.75], [0.35, 1], [0.65, 1], [0.88, 0.75], [1, end]].map(([k, w]) => [from + (to - from) * k, mid + (e - mid) * w])) };
 };
-const block = (from, to) => ({ on: 'torso', plump: 0.5, edges: [[0.08, 0.05], [0.48, 0.56]].map(([end, mid]) => [[from, end], [from + 0.05, mid], [to - 0.05, mid], [to, end]]) });
+const block = (from, to) => ({ on: 'torso', plump: 0.5, swell: 1.5, edges: [[0.08, 0.05], [0.48, 0.56]].map(([end, mid]) => [[from, end], [from + 0.05, mid], [to - 0.05, mid], [to, end]]) });
 const SHAPES = {
-  chest: [{ on: 'torso', edges: [
+  chest: [{ on: 'torso', swell: 1.8, edges: [
     [[2.9, 0.07], [3.02, 0.42], [2.92, 0.85], [2.6, 1.35]],
     [[1.95, 0.07], [1.82, 0.4], [1.95, 0.85], [2.36, 1.35]]] }],
   // The long muscle in its blocks, and the one that wraps the side.
-  abs: [...[[0.4, 0.8], [0.82, 1.2], [1.22, 1.58], [1.6, 1.92]].map(([a, b]) => block(a, b)), { on: 'torso', plump: 0.4, edges: [
+  abs: [...[[0.4, 0.8], [0.82, 1.2], [1.22, 1.58], [1.6, 1.92]].map(([a, b]) => block(a, b)), { on: 'torso', plump: 0.4, swell: 1.5, edges: [
     [[1.75, 0.68], [1.2, 0.66], [0.8, 0.66], [0.42, 0.7]],
     [[1.85, 1.2], [1.35, 1.6], [0.85, 1.6], [0.42, 1.3]]] }],
   lats: [{ on: 'torso', edges: [
@@ -514,7 +521,7 @@ const SHAPES = {
     [[0.36, PI - 0.42], [0.8, PI - 0.56], [1.3, PI - 0.4], [1.9, PI - 0.12]]] }],
   shoulders: [-1, 0, 1].map((h) => ({ on: 'arm', top: true, edges: [-0.54, 0.54].map((e) => [
     [-0.5, 1.12 * h + e], [-0.1, 1.12 * h + e], [0.22, 0.85 * h + 0.85 * e], [0.54, 0.28 * h + 0.25 * e]]) })),
-  biceps: [spindle('arm', 0.2, 0.97, PI - 0.95, PI + 0.95, 0.25)],
+  biceps: [{ ...spindle('arm', 0.2, 0.97, PI - 0.95, PI + 0.95, 0.25), swell: 2 }],
   triceps: [spindle('arm', 0.26, 0.88, -1.05, -0.05, 0.3), spindle('arm', 0.26, 0.88, 0.05, 1.05, 0.3)],
   forearms: [PI - 0.5, PI + 0.5, 1.5, -1.5].map((m) => spindle('arm', 1.04, 1.66, m - 0.46, m + 0.46, 0.3)),
   quads: [spindle('leg', 0.12, 0.9, -0.38, 0.38, 0.25), spindle('leg', 0.08, 0.95, -1.75, -0.42, 0.35), spindle('leg', 0.4, 0.99, 0.42, 1.2, 0.3)],
@@ -532,9 +539,9 @@ const SHAPES = {
 // are already built: each point is a fixed blend of four of their points, or
 // of eight where the sheet crosses from one part to the next, so it moves with
 // the body and never slides on it. One that crosses the hip is also kept outside
-// the thigh, which turns up into it as the hip bends.
+// the thigh, which turns up into it as the hip bends. It thickens with effort.
 const SHEET = { rows: 16, cols: 11, open: true };
-function sheet(mesh, parents, shape, turn, want, thigh) {
+function sheet(mesh, parents, shape, turn, want, thigh, effort) {
   const { v } = mesh;
   const { rows, cols } = SHEET;
   const base = mesh.n;
@@ -568,6 +575,7 @@ function sheet(mesh, parents, shape, turn, want, thigh) {
     }
   }
   const { from, share, lift, many } = part;
+  const hard = 1 + effort * (shape.swell ?? 1) * (want === 'works' ? 1 : 0.5);
   for (let i = 0; i < size; i++) {
     const o = (base + i) * STRIDE;
     let x = 0, y = 0, z = 0, nx = 0, ny = 0, nz = 0;
@@ -581,7 +589,8 @@ function sheet(mesh, parents, shape, turn, want, thigh) {
       ny += k * v[f + 4];
       nz += k * v[f + 5];
     }
-    const l = lift[i] / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1);
+    const stand = lift[i] * hard;
+    const l = stand / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1);
     x += nx * l;
     y += ny * l;
     z += nz * l;
@@ -590,7 +599,7 @@ function sheet(mesh, parents, shape, turn, want, thigh) {
       const bone = sub(knee, hip);
       const u = Math.max(0, dot(sub([x, y, z], hip), bone) / dot(bone, bone));
       const out = sub([x, y, z], add(hip, bone, u));
-      const room = legR(u)[0] + 1 + 0.5 * lift[i];
+      const room = legR(u)[0] + 1 + 0.5 * stand;
       if (len(out) < room) [x, y, z] = add(add(hip, bone, u), out, room / len(out));
       z = Math.sign(hip[2]) * Math.max(0.5, z * Math.sign(hip[2]));
     }
@@ -642,7 +651,7 @@ function muscles(mesh, clip, j, on) {
         // The torso carries both sides, a limb its own.
         const parents = [[shape.on, shape.edges], ...(shape.to ? [[shape.to, shape.far]] : [])].map(([name, edges]) => [on[name][side] ?? on[name][0], US[name],
           name === 'torso' && side ? edges.map((e) => e.map(([u, a]) => [u, -a])) : edges]);
-        sheet(mesh, parents, shape, turn, want, shape.to && [j.hip, j.knee].map((q) => (side ? flip(q) : q)));
+        sheet(mesh, parents, shape, turn, want, shape.to && [j.hip, j.knee].map((q) => (side ? flip(q) : q)), j.life.effort);
       }
     }
   }

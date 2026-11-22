@@ -3,7 +3,7 @@
 // turn it, tap to pause.
 import { h, icon, calm } from '../dom.js';
 import { FORM } from '../form.js';
-import { solve, phase } from '../figure.js';
+import { alive, lifted, solve } from '../figure.js';
 import { STRIDE, build, createMesh, dots } from '../body.js';
 import { createStage, frameCamera } from '../stage.js';
 
@@ -25,8 +25,8 @@ function shared() {
   return stage;
 }
 
-// Returns draw(t, yaw) for one canvas, or null without WebGL 2. Does nothing
-// when the picture would not change, so holds and a paused clip cost little.
+// Returns draw(moment, yaw) for one canvas, or null without WebGL 2. Does nothing
+// when the picture would not change, so a paused clip costs little.
 function drawer(clip, canvas) {
   if (!shared()) return null;
   const g = canvas.getContext('2d');
@@ -45,11 +45,12 @@ function drawer(clip, canvas) {
   let shown = '';
   let framed = '';
   let camera, reach;
-  return (t, yaw) => {
+  return (now, yaw) => {
+    const { t, breath, effort, strain, blink } = now;
     const w = canvas.clientWidth;
     const tall = canvas.clientHeight;
     const d = Math.min(3, devicePixelRatio || 1);
-    const look = `${w} ${tall} ${d} ${dark.matches} ${t} ${yaw}`;
+    const look = `${w} ${tall} ${d} ${dark.matches} ${yaw} ${[t, breath, effort, strain, blink]}`;
     if (!stage || !w || look === shown) return;
     shown = look;
     for (const c of [canvas, easel]) {
@@ -61,7 +62,7 @@ function drawer(clip, canvas) {
       camera = frameCamera(cloud, yaw, PITCH, w / tall);
       reach = cloud.reduce((far, p) => Math.max(far, Math.hypot(p[0] - camera.at[0], p[1] - camera.at[1], p[2] - camera.at[2])), 0);
     }
-    build(mesh, clip, solve(clip.pose(t)), t);
+    build(mesh, clip, solve(clip.pose(t), now), t);
     stage.draw(mesh, camera.back[2] >= 0 ? path : far, camera, { dark: dark.matches, reach });
     g.clearRect(0, 0, canvas.width, canvas.height);
     g.drawImage(easel, 0, 0);
@@ -108,7 +109,8 @@ function player(clip, name) {
       const canvas = h('canvas');
       const draw = drawer(clip, canvas);
       const yaw = turnable(canvas, clip);
-      if (draw) whileShown(canvas, () => draw(t, yaw()));
+      const at = { t, breath: 1 - lifted(clip, t), effort: 0.7 * lifted(clip, t), strain: 0, blink: 0 };
+      if (draw) whileShown(canvas, () => draw(at, yaw()));
       return h('figure', canvas, h('figcaption', label));
     };
     return h('div.stills', { role: 'img', 'aria-label': `${name}, start and end position` }, still(0, 'Start'), still(1, 'End'));
@@ -137,8 +139,8 @@ function player(clip, name) {
   whileShown(el, (now) => {
     if (playing && before != null) at += Math.min(0.1, (now - before) / 1000);
     before = now;
-    const p = phase(clip, at);
-    draw(p.t, yaw());
+    const p = alive(clip, at);
+    draw(p, yaw());
     if (p.part !== part) {
       part = p.part;
       [word.textContent, breath.textContent] = cue[part];

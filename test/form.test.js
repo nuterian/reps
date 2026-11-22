@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { BONE, CYCLE, add, cross, dir, dot, len, mix, phase, solve, sub, unit } from '../src/figure.js';
+import { BONE, CYCLE, STILL, add, alive, cross, dir, dot, len, mix, phase, solve, sub, unit } from '../src/figure.js';
 import { CAP, MUSCLES, STRIDE, build, createMesh } from '../src/body.js';
 import { FORM } from '../src/form.js';
 import { EXERCISES, ROUTINES } from '../src/seed.js';
@@ -530,4 +530,100 @@ test('the upper arm does not twist as a curl starts', () => {
     return (Math.atan2(f[2], f[0]) * 180) / Math.PI; // 0 is biceps forward
   });
   for (const f of facing) near(f, 0, 5, 'biceps facing forward');
+});
+
+test('the figure lives: it breathes as the words say, works its muscles, blinks, and never sways', () => {
+  const FRAMES = Array.from({ length: CYCLE * 30 }, (_, i) => i / 30);
+  for (const [id, clip] of Object.entries(FORM)) {
+    const m = createMesh();
+    const lifting = clip.lowersFirst ? 3 : 1;
+    const held = clip.lowersFirst ? 0 : 2; // the hold at the end of the lift
+    let before;
+    for (const s of FRAMES) {
+      const now = alive(clip, s);
+      const j = solve(clip.pose(now.t), now);
+      // Only the head moves, so what is checked of the plain figure holds for this one.
+      const plain = solve(clip.pose(now.t));
+      for (const part of ['shoulder', 'hip', 'knee', 'ankle', ...(id === 'cable-crunch' ? [] : ['elbow', 'hand'])]) near(dist(j[part], plain[part]), 0, 1e-9, `${id} ${part} at ${s}`);
+      j.spine.forEach((p, i) => near(dist(p, plain.spine[i]), 0, 1e-9, `${id}: the trunk sways at ${s}`));
+      const back = dot(sub(j.head, plain.head), j.front[2]);
+      assert.ok(back < 1e-9 && back > -1, `${id}: the head is drawn back, not let forward, at ${s}`);
+      if (now.part === lifting && Math.abs(now.k - 0.5) < 0.05) assert.ok(back < -0.5, `${id}: and is on the drive`);
+      for (const [k, hi] of [['breath', 1.25], ['effort', 1.25], ['strain', 4], ['blink', 1]]) assert.ok(now[k] >= 0 && now[k] <= hi, `${id} ${k} at ${s}: ${now[k]}`);
+      build(m, clip, j, now.t);
+      const v = m.v.slice(0, m.n * STRIDE);
+      let step = 0;
+      for (let i = 0; before && i < v.length; i += 3 * STRIDE) step = Math.max(step, (v[i] - before[i]) ** 2 + (v[i + 1] - before[i + 1]) ** 2 + (v[i + 2] - before[i + 2]) ** 2);
+      assert.ok(step < 6.5 ** 2, `${id} at ${s.toFixed(2)}: a point jumps ${Math.sqrt(step).toFixed(1)}`);
+      before = v;
+    }
+    // Out on the lift, in on the way down, and no value jumps, at the ends of a part either.
+    for (let i = 1; i <= CYCLE * 240; i++) {
+      const [was, now] = [alive(clip, (i - 1) / 240), alive(clip, i / 240)];
+      for (const [k, most] of [['t', 0.01], ['breath', 0.02], ['effort', 0.02], ['strain', 0.1]]) assert.ok(Math.abs(now[k] - was[k]) < most, `${id}: ${k} jumps at ${(i / 240).toFixed(2)}`);
+      if (was.part !== now.part || now.part % 2 === 0) continue;
+      assert.ok((now.breath - was.breath) * (now.part === lifting ? -1 : 1) >= -1e-9, `${id} breathes the wrong way at ${(i / 240).toFixed(2)}`);
+    }
+    // Hard where the lift ends, hardest on the way there, slack where it starts.
+    const start = (part) => [0, 0.7, 0.7 + (clip.lowersFirst ? 2.4 : 1.2), 1.4 + (clip.lowersFirst ? 2.4 : 1.2)][part];
+    const [low, high] = [alive(clip, start(2 - held) + 0.02), alive(clip, start(held) + 0.02)];
+    const peak = Math.max(...FRAMES.map((s) => alive(clip, s)).filter((x) => x.part === lifting).map((x) => x.effort));
+    assert.ok(low.effort < 0.1 && high.effort > 0.6 && peak > high.effort + 0.05, `${id}: effort ${low.effort}, ${peak}, ${high.effort}`);
+    // In the hold at the end of the lift the weight sinks a little, and comes back; before the lift it waits.
+    const sunk = Math.abs(alive(clip, start(held) + 0.35).t - (clip.lowersFirst ? 0 : 1));
+    assert.ok(sunk > 0.003 && sunk < 0.01, `${id}: the weight sinks by ${sunk} in the hold`);
+    for (const k of [0.1, 0.35, 0.6]) assert.equal(alive(clip, start(2 - held) + k).t, clip.lowersFirst ? 1 : 0, `${id}: no false start`);
+
+    // Every working muscle stands out further where the lift ends than where it starts, breath and all.
+    const plain = build(createMesh(), clip, solve(clip.pose(0.5)), 0.5);
+    const out = (life) => {
+      build(m, clip, solve(clip.pose(0.5), { ...STILL, ...life }), 0.5);
+      return plain.parts.filter((p) => p.want).map((p) => {
+        const o = (p.base + (p.rows >> 1) * p.cols + (p.cols >> 1)) * STRIDE;
+        return [p.want, [0, 1, 2].reduce((sum, a) => sum + (m.v[o + a] - plain.v[o + a]) * plain.v[o + 3 + a], 0)];
+      });
+    };
+    const ends = [out({ breath: high.breath, effort: high.effort }), out({ breath: low.breath, effort: low.effort })];
+    ends[0].forEach(([want, far], i) => assert.ok(want === 'helps' || far > ends[1][i][1] + 0.15, `${id}: muscle ${i} stands ${far.toFixed(2)} out at the end of the lift, ${ends[1][i][1].toFixed(2)} at the start`));
+    // And none balloons: it thickens by less than a quarter of its width or length.
+    const thick = [out({ effort: peak }), out({ effort: 0 })];
+    plain.parts.filter((p) => p.want).forEach(({ base, rows, cols }, i) => {
+      const point = (r, k) => [...plain.v.subarray((base + r * cols + k) * STRIDE, (base + r * cols + k) * STRIDE + 3)];
+      const path = (n, at) => Array.from({ length: n - 1 }, (_, k) => dist(at(k), at(k + 1))).reduce((a, b) => a + b);
+      const size = Math.min(path(cols, (k) => point(rows >> 1, k)), path(rows, (r) => point(r, cols >> 1)));
+      const more = thick[0][i][1] - thick[1][i][1];
+      assert.ok(more < size / 4, `${id}: muscle ${i}, ${size.toFixed(1)} across, thickens by ${more.toFixed(2)}`);
+    });
+    // A full chest is deeper than an empty one.
+    const depth = (breath) => {
+      build(m, clip, solve(clip.pose(0.5), { ...STILL, breath }), 0.5);
+      const { base, rows, cols } = m.parts.find((p) => p.cols === 36);
+      return Math.max(...Array.from({ length: rows }, (_, r) => dist(m.v.subarray((base + r * cols) * STRIDE), m.v.subarray((base + r * cols + cols / 2) * STRIDE))));
+    };
+    assert.ok(depth(1) > depth(0) + 0.6, `${id}: the chest fills`);
+  }
+  // A muscle that helps swells half as much as one that works.
+  const swell = (want) => {
+    const clip = { ...FORM.rdl, works: [], helps: [], [want]: ['calves'] };
+    const middle = (effort) => {
+      const m = build(createMesh(), clip, solve(clip.pose(0), { ...STILL, effort }), 0);
+      const { base, rows, cols } = m.parts.find((p) => p.want);
+      return [...m.v.subarray((base + (rows >> 1) * cols + (cols >> 1)) * STRIDE)].slice(0, 3);
+    };
+    return dist(middle(0), middle(1));
+  };
+  near(swell('helps') / swell('works'), 0.5, 0.05, 'a helping muscle swells half as much');
+  // Eyes: shut and open again within a quarter of a second, every few seconds.
+  const tall = (blink) => {
+    const { rdl } = FORM;
+    const j = solve(rdl.pose(0), { ...STILL, blink });
+    const m = build(createMesh(), rdl, j, 0);
+    const iris = m.parts.find((p) => p.cols === 20 && p.rows === 6);
+    const ys = Array.from({ length: iris.rows * iris.cols }, (_, i) => dot(sub(m.v.subarray((iris.base + i) * STRIDE, (iris.base + i) * STRIDE + 3), j.head), j.headUp));
+    return Math.max(...ys) - Math.min(...ys);
+  };
+  assert.ok(tall(1) < 0.2 * tall(0), 'a shut eye');
+  const shut = Array.from({ length: 1200 }, (_, i) => alive(FORM.rdl, i / 60).blink > 0.5);
+  const blinks = shut.filter((x, i) => x && !shut[i - 1]).length;
+  assert.ok(blinks >= 4 && blinks <= 8, `${blinks} blinks in 20 seconds`);
 });
