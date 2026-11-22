@@ -187,3 +187,9 @@ Needs your decision:
 - Publishing. Evidence: the live site is still the first design. Recommendation: publish once you like the clips on this branch.
 
 Stopped: the limit of 3 iterations. 3 iterations, 3 kept, 0 dropped.
+
+## Polish run 2026-11-22, second (branch polish/2026-11-22-2, from e411aac)
+
+Focus, in the user's words: improve the 3d models, materials, textures, motion further. At most 3 iterations.
+
+1. Kept: in all ten clips the thighs grow out of the hips, so the shorts read as one garment, instead of capped tubes pushed into the pelvis with a shelf at the top. Found by an animation and lighting director, all clips, worst in Cable Crunch from behind and Dumbbell Curl from the front. Proof: a test that the end of a thigh is inside the body, that its skin never folds back outside it (old: 12 folds in three clips, now none), that the hips widen gradually (old: a step of 3.0 in 2 units, now 1.0) and that the seat has no notch behind. The first version was sent back by the review: a notch behind the hips, folds at the groin, and glutes that stood off the body; all measured, reworked and covered by the test. The second review kept it and asked for more clearance under the glutes (0.6 to 1.0), done. Left: the gap between the glutes is about as wide as before, and in Leg Curl the thighs press two points further into the pad.

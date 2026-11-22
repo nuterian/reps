@@ -203,6 +203,56 @@ test('arms grow out of the chest, however high they reach', () => {
   }
 });
 
+test('thighs grow out of the hips, with no shelf, notch or fold where they meet', () => {
+  for (const [id, at] of Object.entries(meshes)) {
+    for (const t of [0, 0.5, 1]) {
+      const m = at(t);
+      const j = solve(FORM[id].pose(t));
+      const torso = m.parts.find((p) => p.cols === 36);
+      const thighs = m.parts.filter((p) => p.cols === 24);
+      assert.equal(thighs.length, 2, 'two legs');
+      const { base, cols } = thighs[0];
+      const point = (r, k) => [...m.v.subarray((base + r * cols + (k % cols)) * STRIDE, (base + r * cols + (k % cols)) * STRIDE + 3)];
+      const deep = Math.min(...[0, 0.25, 0.5, 0.75, 1].map((k) => dist(point(0, 0), mix(j.spine[0], j.spine[1], k))));
+      assert.ok(deep < 7, `${id} at ${t}: the thigh starts ${deep.toFixed(1)} from the spine`);
+      // The end of the tube is inside the body, and the skin never folds back over itself outside it.
+      const top = Array.from({ length: cols }, (_, k) => point(2, k));
+      for (let k = 0; k < cols; k += 4) assert.ok(inside(m, torso, top[k]), `${id} at ${t}: the top of a thigh shows`);
+      const ways = [];
+      for (let r = 1; r < 24; r++) {
+        const ring = Array.from({ length: cols }, (_, k) => point(r, k));
+        const middle = [0, 1, 2].map((n) => ring.reduce((sum, q) => sum + q[n], 0) / cols);
+        ring.forEach((q, k) => ways.push([dot(cross(sub(point(r, k + 1), q), sub(point(r + 1, k), q)), sub(q, middle)), q]));
+      }
+      const out = Math.sign(ways.reduce((sum, [way]) => sum + way, 0));
+      for (const [way, q] of ways) if (way * out < 0) assert.ok(inside(m, torso, q), `${id} at ${t}: the thigh folds at ${q.map((n) => n.toFixed(0))}`);
+    }
+  }
+  // Standing, the outline of the hips widens gradually on the way down, and
+  // behind, the seat is one curve in every clip that starts with straight hips.
+  const outline = (id) => {
+    const m = meshes[id](0);
+    const j = solve(FORM[id].pose(0));
+    const all = m.parts.filter((p) => [36, 24].includes(p.cols) && !p.want).flatMap(({ base, rows, cols }) => Array.from({ length: rows * cols }, (_, i) => {
+      const d = sub(m.v.subarray((base + i) * STRIDE, (base + i) * STRIDE + 3), j.spine[0]);
+      return [dot(d, dir(j.angles[0])), -dot(d, j.front[0]), d[2]];
+    }));
+    return Array.from({ length: 21 }, (_, i) => 8 - i).map((h) => {
+      const near = all.filter((p) => Math.abs(p[0] - h) < 0.9);
+      return { back: Math.max(...near.map((p) => p[1])), side: Math.max(...near.map((p) => p[2])) };
+    });
+  };
+  const hips = outline('db-curl');
+  for (let i = 1; i < 14; i++) assert.ok(hips[i].side - hips[i - 1].side < 1, `the hips step out by ${(hips[i].side - hips[i - 1].side).toFixed(1)}`);
+  for (const id of ['db-curl', 'rdl', 'cable-crunch', 'leg-curl']) {
+    const back = outline(id).map((o) => o.back);
+    back.forEach((b, i) => {
+      const dent = Math.min(Math.max(...back.slice(0, i + 1)), Math.max(...back.slice(i))) - b;
+      assert.ok(dent < 0.15, `${id}: a notch ${dent.toFixed(2)} deep behind the hips`);
+    });
+  }
+});
+
 test('no point of the body or the machine snaps from place to place', () => {
   for (const [id, at] of Object.entries(meshes)) {
     let before;
@@ -391,6 +441,21 @@ test('a muscle is a sheet in its own place, not a tint on the skin', () => {
         assert.ok(Math.min(round, cols - round) <= cols / 8, `${id}: sheet ${n} slid ${((Math.min(round, cols - round) / cols) * 360).toFixed(0)} degrees round by ${t}`);
       });
     }
+  }
+  // The glutes lie on the hips: few of their points are under the skin, none far off it.
+  for (const id of ['rdl', 'leg-press']) {
+    const m = meshes[id](1);
+    const skin = m.parts.filter((p) => [36, 24].includes(p.cols) && !p.want);
+    const glutes = m.parts.find((p) => p.want === 'works' && p.many === 8);
+    let under = 0;
+    for (let i = glutes.base; i < glutes.base + glutes.rows * glutes.cols; i++) {
+      const q = [...m.v.subarray(i * STRIDE, i * STRIDE + 3)];
+      let off = Infinity;
+      for (const p of skin) for (let k = p.base; k < p.base + p.rows * p.cols; k++) off = Math.min(off, (m.v[k * STRIDE] - q[0]) ** 2 + (m.v[k * STRIDE + 1] - q[1]) ** 2 + (m.v[k * STRIDE + 2] - q[2]) ** 2);
+      assert.ok(Math.sqrt(off) < 3.65, `${id}: the glutes stand ${Math.sqrt(off).toFixed(1)} off the body`);
+      if (i % 2 && skin.some((p) => inside(m, p, q))) under++;
+    }
+    assert.ok(under < 6, `${id}: ${under} points of the glutes are under the skin`);
   }
   // Where the shoulder sits on the arm: on top as a press starts, on the side of the head overhead.
   const cap = (t) => {

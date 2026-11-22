@@ -164,23 +164,23 @@ const easeIn = (x, lo, hi) => { const k = Math.min(1, Math.max(0, (x - lo) / (hi
 // --- limbs -----------------------------------------------------------------
 
 // A limb from a through joint j to b. u runs 0..1..2 along the two bones.
-// Angle 0 faces `way`, the outside of the bend. The far side is mirrored. An
-// arm also has a root inside the torso: there u runs on from 0 down to -1, so
-// the shoulder is one skin with the arm wherever the arm points.
-function limb(mesh, a, j, b, way, us, cols, radius, paint, root = null) {
+// Angle 0 faces `way`, the outside of the bend. The far side is mirrored. A
+// limb has a root inside the torso: there u runs on from 0 down to -1, so the
+// shoulder or hip is one skin with it wherever it points.
+function limb(mesh, a, j, b, way, us, cols, radius, paint, root) {
   const d1 = unit(sub(j, a));
   const d2 = unit(sub(b, j));
   const l1 = len(sub(j, a));
   const l2 = len(sub(b, j));
-  const d0 = root ? unit(sub(a, root)) : d1;
-  const l0 = root ? len(sub(a, root)) : l1;
+  const d0 = unit(sub(a, root));
+  const l0 = len(sub(a, root));
   // Around a joint the path rounds the corner from p to q.
   const corner = (p, at, q, from, to, k) => [
     [0, 1, 2].map((i) => (1 - k) ** 2 * p[i] + 2 * k * (1 - k) * at[i] + k * k * q[i]), unit(mix(from, to, k))];
   const W = 0.2;
-  const R = root ? 0.75 : 0;
+  const R = 0.75;
   const path = (u) => {
-    if (root && u < 0.26) {
+    if (u < 0.26) {
       if (u < -R) return [add(a, d0, l0 * u), d0];
       return corner(add(a, d0, -l0 * R), a, add(a, d1, l1 * 0.26), d0, d1, (u + R) / (0.26 + R));
     }
@@ -213,7 +213,7 @@ function limb(mesh, a, j, b, way, us, cols, radius, paint, root = null) {
 }
 
 const armR = profile([[-1, 4.6], [-0.6, 4.8], [-0.25, 4.2], [0.1, 4.3], [0.25, 4.5], [0.5, 4.0], [0.86, 3.15], [1, 3.2], [1.22, 3.5], [1.55, 2.7], [1.86, 1.95], [2.1, 2.1]]);
-const legR = profile([[-0.22, 7], [0, 8], [0.18, 7.9], [0.5, 6.5], [0.86, 4.9], [1, 4.7], [1.15, 4.3], [1.4, 4.1], [1.72, 2.9], [1.92, 2.5], [2.1, 2.7]]);
+const legR = profile([[-1, 2.5], [-0.65, 4.6], [-0.3, 6.6], [0, 7.9], [0.2, 7.9], [0.5, 6.5], [0.86, 4.9], [1, 4.7], [1.15, 4.3], [1.4, 4.1], [1.72, 2.9], [1.92, 2.5], [2.1, 2.7]]);
 
 const ARM = {
   shoulders: (u) => 0.85 * bump(Math.max(0, Math.abs(u + 0.05) - 0.22), 0.2),
@@ -253,21 +253,24 @@ function fist(mesh, at, along, grip) {
 const LEG = {
   quads: (u, a) => bump(u - 0.48, 0.36) * toward(a, 0, 0.7),
   hamstrings: (u, a) => bump(u - 0.52, 0.34) * toward(a, Math.PI, 0.7),
-  glutes: (u, a) => bump(u + 0.04, 0.2) * toward(a, Math.PI, 0.8),
+  glutes: (u, a) => bump(u + 0.22, 0.24) * toward(a, Math.PI, 0.8),
   calves: (u, a) => bump(u - 1.27, 0.2) * toward(a, Math.PI, 0.8),
 };
 const HEM = 0.6;
 const SOCK = 1.8;
-const LEG_U = hemmed(-0.18, 2.06, 46, [HEM, SOCK]);
+const LEG_U = hemmed(-1, 2.06, 52, [HEM, SOCK]);
 
 function legs(mesh, j) {
   const cloth = (r) => r <= LEG_U.indexOf(HEM);
   const sock = (r) => r > LEG_U.indexOf(SOCK);
-  const radius = (u, a, r) => legR(u)[0] + 0.9 * LEG.quads(u, a) + 0.8 * LEG.hamstrings(u, a) + LEG.glutes(u, a) + 1.3 * LEG.calves(u, a)
-    + 0.5 * bump(u - 1, 0.07) * toward(a, 0, 2) + (cloth(r) ? 0.4 + 0.35 * u : sock(r) ? 0.25 : 0);
+  const radius = (u, a, r) => legR(u)[0] + 0.9 * LEG.quads(u, a) + 0.8 * LEG.hamstrings(u, a) + 2 * LEG.glutes(u, a) + 1.3 * LEG.calves(u, a)
+    + 0.5 * bump(u - 1, 0.07) * toward(a, 0, 2) + (cloth(r) ? 0.4 + 0.35 * Math.max(0, u) : sock(r) ? 0.25 : 0);
   const paint = (u, a, r) => [sock(r) ? C.sock : cloth(r) ? C.shorts : C.skin, cloth(r) ? 0.03 : 0.12];
+  // Deep in the hips, half way between up the spine and back along the thigh,
+  // so the thigh grows out of them wherever it points and never folds sharply.
+  const root = add([j.hip[0], j.hip[1], 3.5], unit(add(dir(j.angles[0]), unit(sub(j.knee, j.hip)), -0.7)), 9);
   return [(p) => p, flip].map((m) => {
-    const part = limb(mesh, m(j.hip), m(j.knee), m(j.ankle), m(j.kneeWay), LEG_U, 24, radius, paint);
+    const part = limb(mesh, m(j.hip), m(j.knee), m(j.ankle), m(j.kneeWay), LEG_U, 24, radius, paint, m(root));
     shoe(mesh, m(j.ankle), m(j.toe), m(j.sole));
     return part;
   });
@@ -300,7 +303,7 @@ function shoe(mesh, ankle, toe, sole) {
 // u follows the spine: 0 hips, 3 base of the neck. Half width, depth to the
 // front, depth to the back.
 const torsoR = profile([
-  [-0.62, 3, 3, 3], [-0.45, 8, 5.6, 6], [-0.1, 11.6, 7.2, 8.8], [0.3, 11.5, 7.4, 8], [0.8, 10, 6.8, 6.6], [1.2, 9.9, 6.9, 6.6], [1.7, 11.1, 7.6, 7.4],
+  [-0.62, 3, 2.5, 2.5], [-0.45, 7, 4.6, 4.6], [-0.25, 10, 6, 6.4], [-0.02, 11.6, 7.2, 8.2], [0.3, 11.5, 7.4, 8], [0.8, 10, 6.8, 6.6], [1.2, 9.9, 6.9, 6.6], [1.7, 11.1, 7.6, 7.4],
   [2.2, 12.8, 8.2, 8], [2.6, 12.6, 7.4, 7.8], [2.78, 12, 6.2, 7], [2.92, 10.6, 5.4, 6.3], [3.06, 8, 4.7, 5.5], [3.2, 5.8, 4.3, 4.9], [3.34, 4.5, 4.1, 4.3], [3.45, 4.1, 3.9, 4.1], [3.9, 3.9, 3.8, 3.9], [4.1, 3.6, 3.4, 3.6],
 ]);
 const TORSO = {
@@ -587,7 +590,7 @@ function sheet(mesh, parents, shape, turn, want, thigh) {
       const bone = sub(knee, hip);
       const u = Math.max(0, dot(sub([x, y, z], hip), bone) / dot(bone, bone));
       const out = sub([x, y, z], add(hip, bone, u));
-      const room = legR(u)[0] + 1.4 + 0.5 * lift[i];
+      const room = legR(u)[0] + 1 + 0.5 * lift[i];
       if (len(out) < room) [x, y, z] = add(add(hip, bone, u), out, room / len(out));
       z = Math.sign(hip[2]) * Math.max(0.5, z * Math.sign(hip[2]));
     }
