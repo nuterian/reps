@@ -20,8 +20,8 @@ export default function past() {
         const count = r.rows.length + (s.cardio ? 1 : 0);
         return h('li', h('a', { href: `#/s/${s.id}` },
           h('span.entry-main',
-            h('span.name', `${fmtDate(s.start)} · ${s.name}`),
-            h('span.sub', `${count} logged` + (r.of ? ` · beat last time on ${r.wins} of ${r.of}` : ''))),
+            h('span.name', fmtDate(s.start)),
+            h('span.sub', `${s.name}, ${count} logged` + (r.of ? `, beat last time on ${r.wins} of ${r.of}` : ''))),
           icon('next')));
       })),
     ]),

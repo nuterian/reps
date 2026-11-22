@@ -16,14 +16,14 @@ const TYPES = {
   '.svg': 'image/svg+xml',
 };
 
-export function serve(port = 0) {
+export function serve(port = 0, root = ROOT) {
   const server = createServer(async (req, res) => {
     let path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if (path === '/reps') path = '/reps/';
     if (path.startsWith('/reps/')) path = path.slice(5);
     if (path.endsWith('/')) path += 'index.html';
-    const file = normalize(join(ROOT, path));
-    if (!file.startsWith(ROOT)) return res.writeHead(403).end();
+    const file = normalize(join(root, path));
+    if (!file.startsWith(root)) return res.writeHead(403).end();
     try {
       const body = await readFile(file);
       res.writeHead(200, {

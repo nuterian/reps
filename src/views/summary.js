@@ -1,12 +1,13 @@
-import { h, go, fmtDate, topbar } from '../dom.js';
+import { h, back, up, redirect, fmtDate, topbar } from '../dom.js';
 import { state, deleteSession } from '../store.js';
 import { weekStart } from '../progression.js';
-import { finished, review, setsText, planText, deltaText } from '../log.js';
+import { finished, review, planSets, deltaText } from '../log.js';
+import { nums } from './parts.js';
 
 export default function summary(id) {
   const s = state.sessions.find((x) => x.id === id && x.end);
   if (!s) {
-    go('/');
+    redirect('/');
     return h('main');
   }
   const { rows, wins, of } = review(s);
@@ -25,32 +26,30 @@ export default function summary(id) {
   const remove = () => {
     if (!confirm('Delete this session? This cannot be undone.')) return;
     deleteSession(s);
-    go('/past');
+    back('/past');
   };
 
   return h('main.summary',
     topbar('#/past', fmtDate(s.start)),
-    h('section.head',
-      h('p.label', `${s.name} · ${mins} min`),
-      h('p.big.words', head),
-      h('p.week', sub),
-    ),
+    h('h2.d.headline', head),
+    h('p.sub-head', `${sub} ${s.name}, ${mins} min.`),
     h('ul.results',
       rows.map((r) => h('li',
         h('div.result-head',
           h('span.name', r.ex.name),
           h('span', { class: `delta ${r.cmp.status}` }, deltaText(r.cmp))),
-        h('p.sub', setsText(r.sets)),
-        r.next && h('p.next', h('b', 'Next '), planText(r.next, r.weighted), h('span.why', r.next.reason)),
+        nums(r.sets),
+        r.next && h('p.next', h('b', 'Next'), ' ', nums(planSets(r.next, r.weighted)), h('span.why', r.next.reason)),
+        r.pace && h('p.pace', r.pace),
       )),
       s.cardio && h('li',
-        h('div.result-head', h('span.name', 'Cardio')),
-        h('p.sub', `${state.exercises.get(s.cardio.ex)?.name ?? 'Cardio'} · ${s.cardio.min} min`)),
+        h('div.result-head', h('span.name', state.exercises.get(s.cardio.ex)?.name ?? 'Cardio')),
+        h('span.nums.d', h('span.w', String(s.cardio.min), h('small', ' min')))),
     ),
-    h('div.tools.end',
-      h('a.quiet', { href: `#/edit/${s.id}` }, 'Correct this session'),
-      h('button.quiet.danger', { onclick: remove }, 'Delete'),
+    h('div.pair',
+      h('a.btn.line.sm', { href: `#/edit/${s.id}` }, 'Correct'),
+      h('button.btn.line.sm', { onclick: remove }, 'Delete'),
     ),
-    h('div.dock', h('a.primary', { href: '#/' }, 'Done')),
+    h('div.dock', h('a.btn.go', { href: '#/', onclick: (e) => { e.preventDefault(); up('/'); } }, 'Done')),
   );
 }

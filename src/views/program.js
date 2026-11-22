@@ -1,7 +1,7 @@
-// Everything behind "Edit program": routines, the exercise library, settings
-// and backup.
-import { h, icon, go, refresh, stepper, topbar } from '../dom.js';
-import { state, saveRoutine, deleteRoutine, saveExercise, saveSettings, exportData, importData } from '../store.js';
+// Everything behind "Program": routines, the form to edit an exercise,
+// settings and backup.
+import { h, icon, go, back, up, replace, redirect, boot, refresh, stepper, topbar } from '../dom.js';
+import { state, saveRoutine, deleteRoutine, saveExercise, saveSettings, exportData, importData, usedMB } from '../store.js';
 import { MUSCLES, EQUIPMENT } from '../seed.js';
 import { stepFor } from '../units.js';
 import { unit } from '../log.js';
@@ -46,16 +46,15 @@ export function program() {
     try {
       const data = JSON.parse(await file.text());
       if (!confirm('Replace everything on this phone with this backup?')) return;
-      await importData(data);
+      importData(data);
       say(`Backup restored: ${state.sessions.length} sessions.`);
     } catch (err) {
       say(err instanceof SyntaxError ? 'This is not a Reps backup file.' : err.message);
     }
   };
-  const count = [...state.exercises.values()].filter((x) => !x.hidden).length;
 
   return h('main',
-    topbar('#/', 'Edit program'),
+    topbar('#/', 'Program'),
     h('h3', 'Routines, in rotation order'),
     h('ul.list', routines.map((r, i) => h('li',
       h('a', { href: `#/routine/${r.id}` },
@@ -64,11 +63,7 @@ export function program() {
       h('button.icon-btn', { disabled: i === routines.length - 1, 'aria-label': `Move ${r.name} down`, onclick: () => move(i, 1) }, icon('down')),
     ))),
     h('button.add', { onclick: newRoutine }, icon('plus'), 'New routine'),
-
-    h('h3', 'Exercises'),
-    h('ul.list', h('li', h('a', { href: '#/library' },
-      h('span.entry-main', h('span.name', 'Exercise library'), h('span.sub', `${count} exercises`)),
-      icon('next')))),
+    h('a.add', { href: '#/build' }, icon('swap'), 'Build from exercises you know'),
 
     h('h3', 'Settings'),
     h('div.setting', h('span', 'Weight unit'),
@@ -83,17 +78,18 @@ export function program() {
     h('h3', 'Backup'),
     h('p.note', 'Your data lives only on this phone. Removing the app from the Home Screen deletes it, so export a copy now and then.'),
     h('div.pair',
-      h('button.secondary', { onclick: exportBackup }, 'Export backup'),
-      h('label.secondary', 'Import backup',
+      h('button.btn.line.sm', { onclick: exportBackup }, 'Export backup'),
+      h('label.btn.line.sm', 'Import backup',
         h('input', { type: 'file', accept: 'application/json,.json', hidden: true, onchange: importBackup }))),
     notice && h('p.note.notice', { role: 'status' }, notice),
+    h('p.note', `Opened in ${Math.round(boot.ms ?? 0)} ms. Using ${usedMB().toFixed(1)} of about 5 MB.`),
   );
 }
 
 export function routine(id) {
   const r = state.routines.find((x) => x.id === id);
   if (!r) {
-    go('/program');
+    redirect('/program');
     return h('main');
   }
   const save = () => saveRoutine(r);
@@ -105,7 +101,7 @@ export function routine(id) {
   const remove = () => {
     if (!confirm(`Delete ${r.name}? Logged sessions are kept.`)) return;
     deleteRoutine(r);
-    go('/program');
+    back('/program');
   };
 
   return h('main',
@@ -143,41 +139,17 @@ export function routine(id) {
     h('button.add', {
       onclick: () => pickExercise('Add exercise', (ex) => { r.items.push({ ex, sets: 3, min: 8, max: 12 }); redraw(); }, new Set(r.items.map((it) => it.ex))),
     }, icon('plus'), 'Add exercise'),
-    h('div.tools.end', h('button.quiet.danger', { onclick: remove }, 'Delete routine')),
-  );
-}
-
-export function library() {
-  const all = [...state.exercises.values()];
-  const list = h('div');
-  const fill = (q) => {
-    list.replaceChildren(...MUSCLES.flatMap((m) => {
-      const found = all.filter((x) => x.muscle === m && x.name.toLowerCase().includes(q));
-      if (!found.length) return [];
-      return [h('h3', m), h('ul.list', found.map((x) => h('li', { class: x.hidden ? 'dim' : '' },
-        h('a', { href: `#/exercise/${x.id}` },
-          h('span.entry-main',
-            h('span.name', x.name),
-            h('span.sub', [x.equip, x.custom && 'custom', x.hidden && 'hidden'].filter(Boolean).join(' · '))),
-          icon('next')))))];
-    }));
-  };
-  fill('');
-  return h('main',
-    topbar('#/program', 'Exercises'),
-    h('input.search', { type: 'search', placeholder: 'Search', 'aria-label': 'Search exercises', oninput: (e) => fill(e.target.value.trim().toLowerCase()) }),
-    h('a.add', { href: '#/exercise/new' }, icon('plus'), 'New exercise'),
-    list,
+    h('div.tools.end', h('button.btn.line.sm', { onclick: remove }, 'Delete routine')),
   );
 }
 
 let draft = null; // the exercise being edited, kept across redraws of the form
 
-export function exercise(id) {
+export function exerciseForm(id) {
   const isNew = id === 'new';
   const saved = state.exercises.get(id);
   if (!isNew && !saved) {
-    go('/library');
+    redirect('/library');
     return h('main');
   }
   if (draft?.id !== id) {
@@ -203,18 +175,19 @@ export function exercise(id) {
     if (isNew) out.id = 'c' + Date.now().toString(36);
     saveExercise(out);
     draft = null;
-    go('/library');
+    if (isNew) replace(`/exercise/${out.id}`);
+    else back(`/exercise/${out.id}`);
   };
   const toggle = () => {
     saved.hidden = !saved.hidden;
     if (!saved.hidden) delete saved.hidden;
     saveExercise(saved);
     draft = null;
-    go('/library');
+    up('/library');
   };
 
   return h('main',
-    topbar('#/library', isNew ? 'New exercise' : 'Exercise'),
+    topbar(isNew ? '#/library' : `#/exercise/${id}`, isNew ? 'New exercise' : 'Edit exercise'),
     h('label.field', h('span', 'Name'),
       h('input', { type: 'text', value: d.name, placeholder: 'Exercise name', oninput: (e) => (d.name = e.target.value) })),
     h('label.field', h('span', 'Muscle group'), select('muscle', MUSCLES)),
@@ -223,7 +196,7 @@ export function exercise(id) {
       h('textarea', { rows: 3, value: d.cue || '', placeholder: 'One line to remember', oninput: (e) => (d.cue = e.target.value) })),
     weighted && h('div.setting', h('span', 'Weight step'),
       stepper({ value: step, step: u === 'lb' ? 2.5 : 0.5, min: 0.5, max: 50, decimal: true, label: 'weight step', suffix: u, required: true, onChange: (v) => (step = v) })),
-    h('div.tools.end', !isNew && h('button.quiet', { onclick: toggle }, saved.hidden ? 'Show in lists again' : 'Hide from lists')),
-    h('div.dock', h('button.primary', { onclick: save }, 'Save')),
+    !isNew && h('div.tools.end', h('button.btn.line.sm', { onclick: toggle }, saved.hidden ? 'Show in lists again' : 'Hide from lists')),
+    h('div.dock', h('button.btn.go', { onclick: save }, 'Save')),
   );
 }

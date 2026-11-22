@@ -8,14 +8,14 @@ It is a web app you add to the Home Screen. All data stays on the phone.
 
 1. Open https://jugalm.com/reps/ in Safari.
 2. Tap Share, then Add to Home Screen.
-3. Open it from the Home Screen. It works offline after the first launch.
+3. Always open it from the Home Screen. Safari keeps its own, separate data. It works offline after the first launch.
 
 ## Develop
 
 ```bash
 npm install
 npm run dev        # http://localhost:5173/reps/
-npm test           # rules and offline file list
+npm test           # rules, form clips and offline file list
 npm run test:e2e   # full run in WebKit and Chromium
 ```
 

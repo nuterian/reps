@@ -1,7 +1,7 @@
 // Small DOM helpers shared by every view. No framework.
 import { fmt, round2 } from './units.js';
 
-// h('button.primary', { onclick }, 'Start') -> <button class="primary">Start</button>
+// h('button.btn.go', { onclick }, 'Start') -> <button class="btn go">Start</button>
 export function h(tag, props, ...kids) {
   const [name, ...classes] = tag.split('.');
   const el = document.createElement(name || 'div');
@@ -31,6 +31,7 @@ const PATHS = {
   x: 'M6 6l12 12M18 6L6 18',
   swap: 'M7 8h11l-3-3M17 16H6l3 3',
   out: 'M10 7h7v7M17 7L7 17',
+  play: 'M8 5.5v13l11-6.5z',
 };
 
 export function icon(name) {
@@ -49,9 +50,61 @@ export function icon(name) {
 let draw = () => {};
 export const onRefresh = (fn) => (draw = fn);
 export const refresh = (animate = true) => draw(animate);
+
+// Navigation. Each history entry carries its position, and `trail` remembers
+// the screens visited in this run, so the back arrow can really go back and
+// the iOS edge swipe never lands on a screen that was just left.
+const here = () => location.hash.slice(1) || '/';
+const trail = [];
+let at = history.state?.i ?? 0;
+let ours = false; // this step back was asked for by the app, not by a swipe
+trail[at] = here();
+history.replaceState({ i: at }, '');
+
 export const go = (path) => (location.hash = '#' + path);
 
-const calm = matchMedia('(prefers-reduced-motion: reduce)');
+export function replace(path) {
+  history.replaceState({ i: at }, '', '#' + path);
+  trail[at] = path;
+  draw(true);
+}
+
+// For a view that cannot be shown: leave once it has finished rendering.
+export const redirect = (path) => queueMicrotask(() => replace(path));
+
+const step = (n) => {
+  ours = true;
+  history.go(n);
+};
+
+// One screen back, or to `parent` when there is nothing to go back to.
+export const back = (parent) => (at > 0 && trail[at - 1] != null ? step(-1) : replace(parent));
+
+// Back to a screen further up, however many steps that is.
+export function up(path) {
+  const i = trail.lastIndexOf(path, at - 1);
+  if (at > 0 && i >= 0) step(i - at);
+  else replace(path);
+}
+
+// A swipe brings its own animation, so ours is skipped then.
+addEventListener('hashchange', () => {
+  document.querySelector('dialog[open]')?.close();
+  const known = history.state?.i;
+  if (known == null) {
+    at += 1;
+    trail.length = at;
+    history.replaceState({ i: at }, '');
+  } else at = known;
+  trail[at] = here();
+  draw(known == null || ours);
+  ours = false;
+});
+
+// How long the app took to show its first screen, set once by app.js.
+export const boot = { ms: null };
+
+export const calm = matchMedia('(prefers-reduced-motion: reduce)');
 export function transition(fn) {
   if (!document.startViewTransition || calm.matches) return fn();
   // A second change can arrive mid-animation. The first is then skipped,
@@ -83,6 +136,7 @@ export function stepper({ value, step = 1, min = 0, max = 9999, label, suffix, d
     type: 'text',
     inputmode: decimal ? 'decimal' : 'numeric',
     autocomplete: 'off',
+    enterkeyhint: 'done',
     placeholder: '0',
     value: value == null ? '' : fmt(value),
     'aria-label': label,
@@ -98,6 +152,7 @@ export function stepper({ value, step = 1, min = 0, max = 9999, label, suffix, d
     emit(v);
   };
   input.addEventListener('focus', () => input.select());
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && input.blur());
   input.addEventListener('input', () => emit(read()));
   input.addEventListener('blur', () => {
     const n = read() ?? (required ? valid : null);
@@ -115,7 +170,7 @@ export const fmtDate = (ts) =>
 
 export const topbar = (backHref, title, ...right) =>
   h('header.bar',
-    h('a.back', { href: backHref, 'aria-label': 'Back' }, icon('back')),
-    h('h1', title),
+    h('a.back', { href: backHref, 'aria-label': 'Back', onclick: (e) => { e.preventDefault(); back(backHref.slice(1)); } }, icon('back')),
+    h('h1.d', title),
     h('div.bar-right', ...right),
   );

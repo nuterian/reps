@@ -1,14 +1,19 @@
-// The logging screen. One exercise is open at a time; its next set shows
-// steppers and a Done button, so a set that matches the suggestion is one tap.
-import { h, icon, go, refresh, sheet, stepper, topbar } from '../dom.js';
+// The logging screen: read on top, act at the bottom. The plan scrolls; the
+// deck with weight, reps and Done is fixed, so Done never moves and a set
+// that matches the suggestion is one tap.
+import { h, icon, back, up, replace, redirect, refresh, sheet, stepper, topbar } from '../dom.js';
 import { state, saveSession, saveRoutine } from '../store.js';
 import { toDisplay, toKg, stepFor, fmt } from '../units.js';
 import { unit, kindOf, doneSets, makeEntry, newCardio, finish, historyFor, setsText, cardioTypes } from '../log.js';
 import { EQUIPMENT } from '../seed.js';
+import { swapCounts } from '../smart.js';
 import { pickExercise } from './picker.js';
+import { nums, statusMark } from './parts.js';
+import { formGuide, hasGuide, videoSearch } from './clip.js';
 
-let sid = null;    // session the open state below belongs to
+let sid = null;    // session the state below belongs to
 let openAt = null; // index of the open exercise, 'cardio', or null
+let stamped = -1;  // set just logged in the open exercise, for a one-off animation
 let timer = null;
 
 const todo = (e) => e.sets.some((x) => !x.done);
@@ -19,11 +24,16 @@ function nextOpen(s, from = -1) {
   return left.find((i) => i > from) ?? left[0] ?? null;
 }
 
+const open = (at) => {
+  openAt = at;
+  refresh();
+};
+
 export default function session(editId) {
   clearInterval(timer);
   const s = editId ? state.sessions.find((x) => x.id === editId && x.end) : state.sessions.find((x) => !x.end);
   if (!s) {
-    go('/');
+    redirect('/');
     return h('main');
   }
   if (sid !== s.id) {
@@ -34,70 +44,69 @@ export default function session(editId) {
   const save = () => saveSession(s);
   const end = () => {
     sid = null;
-    go(finish(s) ? `/s/${s.id}` : '/');
+    const past = s.end;
+    const to = finish(s) ? `/s/${s.id}` : '/';
+    // A corrected session goes back to its summary; a finished one is replaced
+    // by it, so a swipe back from the summary leads Home.
+    if (past && to !== '/') back(to);
+    else if (to === '/') up('/');
+    else replace(to);
   };
   const add = () => pickExercise('Add exercise', (id) => {
     s.entries.push(makeEntry({ ex: id, sets: 3, min: 8, max: 12 }));
-    openAt = s.entries.length - 1;
     save();
-    refresh();
+    open(s.entries.length - 1);
   }, new Set(s.entries.map((e) => e.ex)));
-  const coreLeft = s.entries.some((e) => !e.optional && todo(e));
+  const live = { weights: [], reps: null }; // text the deck patches as its steppers move
 
   return h('main.session',
-    topbar(s.end ? `#/s/${s.id}` : '#/', s.name, rest(s)),
-    h('div.entries', s.entries.map((e, i) => entry(s, e, i, save)), cardio(s, save)),
+    topbar(s.end ? `#/s/${s.id}` : '#/', s.name, rest(s), h('button.chip', { onclick: end }, s.end ? 'Save' : 'Finish')),
+    h('div.entries',
+      s.entries.map((e, i) => (i === openAt ? openEntry(s, e, i, save, live) : row(e, i))),
+      cardio(s, save, live)),
     h('button.add', { onclick: add }, icon('plus'), 'Add exercise'),
-    h('div.dock',
-      h('button', { class: coreLeft ? 'secondary' : 'primary', onclick: end }, s.end ? 'Save changes' : 'Finish session'),
-    ),
+    deck(s, save, end, live),
   );
 }
 
 // Time since the last logged set. Quiet: no alarm, nothing to dismiss.
 function rest(s) {
   if (s.end) return null;
-  const el = h('span.rest');
+  const clock = h('span');
+  const el = h('span.rest.d', { hidden: true }, clock, h('small', ' rest'));
   const tick = () => {
     if (!location.hash.startsWith('#/session')) return clearInterval(timer);
     const t = Math.max(0, s.cardio?.t || 0, ...s.entries.flatMap((e) => e.sets.map((x) => x.t || 0)));
     const sec = Math.floor((Date.now() - t) / 1000);
-    el.textContent = t && sec < 3600 ? `Rest ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}` : '';
+    el.hidden = !t || sec >= 3600;
+    clock.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
   };
   tick();
   timer = setInterval(tick, 1000);
   return el;
 }
 
-function statusMark(done, total) {
-  return done >= total
-    ? h('span.status.done', icon('check'))
-    : h('span.status', done ? `${done}/${total}` : '');
+const shown = (x, weighted) => ({ w: weighted ? toDisplay(x.w, unit()) ?? '?' : null, r: x.r });
+
+// A closed exercise: what was done, or what is planned.
+function row(e, i) {
+  const ex = state.exercises.get(e.ex);
+  const weighted = kindOf(ex) === 'weight';
+  const done = doneSets(e);
+  const el = h('button', { class: done.length ? 'row done' : 'row', onclick: () => open(i) },
+    statusMark(done.length, e.sets.length),
+    h('span.row-main', h('span.name', ex.name), e.optional && h('span.opt', 'optional')),
+    nums((done.length ? done : e.sets).map((x) => shown(x, weighted))),
+  );
+  el.style.viewTransitionName = `entry-${i}`;
+  return el;
 }
 
-function entry(s, e, i, save) {
+// The open exercise: what to beat, one cell per set, and its tools.
+function openEntry(s, e, i, save, live) {
   const ex = state.exercises.get(e.ex);
   const weighted = kindOf(ex) === 'weight';
   const u = unit();
-  const shown = (x) => ({ w: toDisplay(x.w, u), r: x.r });
-  const done = doneSets(e);
-  const head = [
-    statusMark(done.length, e.sets.length),
-    h('span.entry-main',
-      h('span.name', ex.name, e.optional && h('span.tag', 'optional')),
-      openAt !== i && h('span.sub',
-        done.length ? setsText(done.map(shown))
-          : weighted && e.sets[0].w == null ? 'pick a weight'
-            : setsText(e.sets.map(shown))),
-    ),
-  ];
-
-  if (openAt !== i) {
-    const el = h('button.entry', { onclick: () => { openAt = i; refresh(); } }, head);
-    el.style.viewTransitionName = `entry-${i}`;
-    return el;
-  }
-
   const active = e.sets.findIndex((x) => !x.done);
   const last = historyFor(e.ex, s.start, 1)[0];
   const routine = state.routines.find((r) => r.id === s.routineId);
@@ -113,67 +122,102 @@ function entry(s, e, i, save) {
     refresh(false);
   };
 
-  const row = (x, n) => {
+  const cell = (x, n) => {
+    const w = weighted && h('b', x.w == null ? '?' : fmt(toDisplay(x.w, u)));
+    const r = h('span.cr.d', String(x.r));
+    const body = [h('span.cw', weighted ? [w, ` ${u}`] : 'reps'), r];
     if (x.done) {
-      const undo = () => { x.done = false; delete x.t; save(); refresh(); };
-      return h('li.set.done',
-        h('button', { 'aria-label': `Set ${n + 1} logged. Tap to change.`, onclick: undo },
-          h('span.n', n + 1), h('span.val', setsText([shown(x)])), icon('check')));
+      const reopen = () => { x.done = false; delete x.t; save(); refresh(false); };
+      return h('button', {
+        class: n === stamped ? 'cell done just' : 'cell done',
+        'aria-label': `Set ${n + 1} logged: ${setsText([{ w: toDisplay(x.w, u), r: x.r }])}. Tap to change.`,
+        onclick: reopen,
+      }, body, icon('check'));
     }
-    if (n !== active) {
-      return h('li.set.todo', h('span.n', n + 1),
-        h('span.val', weighted && [h('span.w', x.w == null ? '–' : fmt(toDisplay(x.w, u))), ` ${u} × `], String(x.r), !weighted && ' reps'));
-    }
-    const mark = () => {
-      x.done = true;
-      x.t = Date.now();
-      if (!todo(e)) openAt = nextOpen(s, i);
-      save();
-      refresh();
-    };
-    const doneBtn = h('button.primary', { disabled: weighted && x.w == null, onclick: mark }, 'Done');
-    // A weight change carries to the sets still to do. Only text is patched,
-    // so nothing re-renders under the finger.
-    const setWeight = (v) => {
-      for (const y of e.sets.slice(n)) if (!y.done) y.w = toKg(v, u);
-      el.querySelectorAll('.set.todo .w').forEach((node) => (node.textContent = v == null ? '–' : fmt(v)));
-      doneBtn.disabled = v == null;
-      save();
-    };
-    return h('li.set.active',
-      h('span.n', n + 1),
-      h('div.steppers',
-        weighted && stepper({ value: toDisplay(x.w, u), step: stepFor(ex, u), decimal: true, label: 'weight', suffix: u, onChange: setWeight }),
-        stepper({ value: x.r, min: 1, max: 999, label: 'reps', suffix: 'reps', required: true, onChange: (v) => { x.r = v; save(); } }),
-      ),
-      doneBtn);
+    if (w) live.weights.push(w);
+    if (n !== active) return h('div.cell', body);
+    live.reps = r;
+    return h('div.cell.now', body);
   };
 
-  const el = h('section.entry.open',
-    h('button.entry-head', { 'aria-expanded': 'true', onclick: () => { openAt = null; refresh(); } }, head),
-    ex.cue && h('p.cue', ex.cue),
-    h('div.tools',
-      h('a.quiet', {
-        href: `https://www.youtube.com/results?search_query=${encodeURIComponent(ex.name + ' form')}`,
-        target: '_blank',
-        rel: 'noopener',
-      }, 'Watch form', icon('out')),
-      !done.length && h('button.quiet', { onclick: () => swap(s, i, save) }, icon('swap'), 'Swap'),
-    ),
+  const el = h('section.row.open',
+    h('button.open-head', { 'aria-expanded': 'true', onclick: () => open(null) },
+      h('h2.d', ex.name), e.optional && h('span.opt', 'optional'), icon('up')),
     e.swapped && h('p.swap-note',
-      `In for ${state.exercises.get(e.swapped).name} today.`,
+      `In for ${state.exercises.get(e.swapped).name} today.`, ' ',
       origin && h('button.quiet', { onclick: keep }, `Keep in ${routine.name}`)),
     e.kept && h('p.swap-note', `${e.kept} now uses this exercise.`),
     h('p.aim', e.reason),
     last && h('p.last', `Last time ${setsText(last.sets)}`),
-    h('ol.sets', e.sets.map(row)),
+    h('div.cells', h('div.cellgrid', e.sets.map(cell)),
+      h('div.setadj',
+        h('button', { 'aria-label': 'Add a set', onclick: () => { e.sets.push({ w: lastSet.w, r: lastSet.r, done: false }); save(); refresh(false); } }, icon('plus')),
+        h('button', { 'aria-label': 'Remove a set', disabled: e.sets.length < 2 || lastSet.done, onclick: () => { e.sets.pop(); if (!todo(e)) openAt = nextOpen(s, i); save(); refresh(false); } }, icon('minus')))),
+    ex.cue && h('p.cue', ex.cue),
     h('div.tools',
-      h('button.quiet', { onclick: () => { e.sets.push({ w: lastSet.w, r: lastSet.r, done: false }); save(); refresh(false); } }, icon('plus'), 'Set'),
-      e.sets.length > 1 && !lastSet.done && h('button.quiet', { onclick: () => { e.sets.pop(); if (!todo(e)) openAt = nextOpen(s, i); save(); refresh(false); } }, icon('minus'), 'Set'),
+      hasGuide(ex)
+        ? h('button.chip', { onclick: () => sheet(ex.name, formGuide(ex)) }, icon('play'), 'Form')
+        : videoSearch(ex, 'Watch form'),
+      !doneSets(e).length && h('button.chip', { onclick: () => swap(s, i, save) }, icon('swap'), 'Swap'),
     ),
   );
+  stamped = -1;
   el.style.viewTransitionName = `entry-${i}`;
   return el;
+}
+
+// The fixed controls for the next set of the open exercise. With nothing
+// left to log there, it offers to finish.
+function deck(s, save, end, live) {
+  const finishBtn = h('button.btn.go', { onclick: end }, s.end ? 'Save changes' : 'Finish session');
+
+  if (openAt === 'cardio' && !s.cardio.done) {
+    const c = s.cardio;
+    return h('div.dock.deck',
+      h('p.deck-title', 'Cardio'),
+      h('div.steppers',
+        stepper({ value: c.min, step: 5, min: 5, max: 600, label: 'minutes', suffix: 'min', required: true, onChange: (v) => { c.min = v; live.reps.textContent = v; save(); } })),
+      h('button.btn.go', { onclick: () => { c.done = true; c.t = Date.now(); openAt = null; save(); refresh(); } }, 'Done'));
+  }
+
+  const e = s.entries[openAt];
+  const n = e ? e.sets.findIndex((x) => !x.done) : -1;
+  if (n < 0) return h('div.dock.deck', finishBtn);
+
+  const x = e.sets[n];
+  const ex = state.exercises.get(e.ex);
+  const weighted = kindOf(ex) === 'weight';
+  const u = unit();
+  const mark = () => {
+    x.done = true;
+    x.t = Date.now();
+    const stay = todo(e);
+    if (stay) stamped = n;
+    else openAt = nextOpen(s, openAt);
+    save();
+    refresh(!stay);
+  };
+  const doneBtn = h('button.btn.go', { disabled: weighted && x.w == null, onclick: mark }, 'Done');
+  // A weight change carries to the sets still to do. Only text is patched,
+  // so nothing re-renders under the finger.
+  const setWeight = (v) => {
+    for (const y of e.sets.slice(n)) if (!y.done) y.w = toKg(v, u);
+    for (const node of live.weights) node.textContent = v == null ? '?' : fmt(v);
+    doneBtn.disabled = v == null;
+    save();
+  };
+  const setReps = (v) => {
+    x.r = v;
+    live.reps.textContent = v;
+    save();
+  };
+  return h('div.dock.deck',
+    h('p.deck-title', `${ex.name}, set ${n + 1} of ${e.sets.length}`),
+    h('div.steppers',
+      weighted && stepper({ value: toDisplay(x.w, u), step: stepFor(ex, u), decimal: true, label: 'weight', suffix: u, onChange: setWeight }),
+      stepper({ value: x.r, min: 1, max: 999, label: 'reps', suffix: 'reps', required: true, onChange: setReps }),
+    ),
+    doneBtn);
 }
 
 // Offer exercises with the same movement, guided equipment first.
@@ -184,7 +228,11 @@ function swap(s, i, save) {
   const free = [...state.exercises.values()].filter((x) => !x.hidden && x.equip !== 'cardio' && !used.has(x.id));
   let alts = free.filter((x) => cur.group && x.group === cur.group);
   if (!alts.length) alts = free.filter((x) => x.muscle === cur.muscle);
-  alts.sort((a, b) => EQUIPMENT.indexOf(a.equip) - EQUIPMENT.indexOf(b.equip));
+  // What you swapped to before comes first, then guided equipment.
+  const counts = swapCounts(state.sessions, cur.id);
+  const times = (x) => counts.get(x.id) || 0;
+  alts = [...new Set([...free.filter(times), ...alts])];
+  alts.sort((a, b) => times(b) - times(a) || EQUIPMENT.indexOf(a.equip) - EQUIPMENT.indexOf(b.equip));
   const choose = (id) => {
     const from = e.swapped ?? e.ex;
     s.entries[i] = makeEntry({ ex: id, sets: e.sets.length, min: e.min, max: e.max, optional: e.optional });
@@ -194,42 +242,40 @@ function swap(s, i, save) {
   };
   const d = sheet(`Swap ${cur.name}`,
     h('div.pick-list',
-      alts.map((x) => h('button.pick', { onclick: () => { d.close(); choose(x.id); } }, h('span.name', x.name), h('span.sub', x.equip))),
+      alts.map((x, n) => h('button.pick', { onclick: () => { d.close(); choose(x.id); } },
+        h('span.name', x.name), h('span.sub', n === 0 && times(x) >= 2 ? 'your usual swap' : x.equip))),
       h('button.pick', { onclick: () => { d.close(); pickExercise(`Swap ${cur.name}`, choose, used); } }, h('span.name', 'All exercises'), icon('next')),
     ),
   );
 }
 
-function cardio(s, save) {
+function cardio(s, save, live) {
   const c = s.cardio;
   const name = state.exercises.get(c.ex)?.name ?? 'Cardio';
-  const head = [
-    statusMark(c.done ? 1 : 0, 1),
-    h('span.entry-main',
-      h('span.name', 'Cardio', h('span.tag', 'optional')),
-      openAt !== 'cardio' && h('span.sub', `${name} · ${c.min} min`),
-    ),
-  ];
+  let el;
   if (openAt !== 'cardio') {
-    const el = h('button.entry', { onclick: () => { openAt = 'cardio'; refresh(); } }, head);
-    el.style.viewTransitionName = 'entry-cardio';
-    return el;
+    el = h('button', { class: c.done ? 'row done' : 'row', onclick: () => open('cardio') },
+      statusMark(c.done ? 1 : 0, 1),
+      h('span.row-main', h('span.name', 'Cardio'), h('span.opt', c.done ? name : 'optional')),
+      c.done && h('span.nums.d', h('span.w', String(c.min), h('small', ' min'))),
+    );
+  } else {
+    const before = state.sessions.filter((o) => o.start < s.start && o.cardio?.done).pop()?.cardio;
+    const minutes = h('span', String(c.min));
+    const body = [h('span.cw', name), h('span.cr.d', minutes, h('small', ' min'))];
+    live.reps = minutes;
+    const reopen = () => { c.done = false; delete c.t; save(); refresh(false); };
+    el = h('section.row.open',
+      h('button.open-head', { 'aria-expanded': 'true', onclick: () => open(null) },
+        h('h2.d', 'Cardio'), h('span.opt', 'optional'), icon('up')),
+      before && h('p.last', `Last time ${state.exercises.get(before.ex)?.name ?? 'cardio'}, ${before.min} min`),
+      h('div.cells', c.done
+        ? h('button.cell.done', { 'aria-label': `Cardio logged: ${name}, ${c.min} minutes. Tap to change.`, onclick: reopen }, body, icon('check'))
+        : h('div.cell.now', body)),
+      !c.done && h('div.chips', { style: 'margin-top:14px' }, cardioTypes().map((t) =>
+        h('button', { class: t.id === c.ex ? 'chip on' : 'chip', onclick: () => { c.ex = t.id; save(); refresh(false); } }, t.name))),
+    );
   }
-  const before = state.sessions.filter((o) => o.start < s.start && o.cardio?.done).pop()?.cardio;
-  const el = h('section.entry.open',
-    h('button.entry-head', { 'aria-expanded': 'true', onclick: () => { openAt = null; refresh(); } }, head),
-    h('div.chips', cardioTypes().map((t) =>
-      h('button', { class: t.id === c.ex ? 'chip on' : 'chip', disabled: c.done, onclick: () => { c.ex = t.id; save(); refresh(false); } }, t.name))),
-    before && h('p.last', `Last time ${state.exercises.get(before.ex)?.name ?? 'cardio'} · ${before.min} min`),
-    h('ol.sets', c.done
-      ? h('li.set.done',
-        h('button', { 'aria-label': 'Cardio logged. Tap to change.', onclick: () => { c.done = false; delete c.t; save(); refresh(); } },
-          h('span.val', `${name} · ${c.min} min`), icon('check')))
-      : h('li.set.active',
-        h('div.steppers',
-          stepper({ value: c.min, step: 5, min: 5, max: 600, label: 'minutes', suffix: 'min', required: true, onChange: (v) => { c.min = v; save(); } })),
-        h('button.primary', { onclick: () => { c.done = true; c.t = Date.now(); openAt = null; save(); refresh(); } }, 'Done'))),
-  );
   el.style.viewTransitionName = 'entry-cardio';
   return el;
 }
