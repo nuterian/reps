@@ -86,8 +86,8 @@ Not built, by the user's choice: adjusting the rest of an exercise from the firs
 `src/figure.js` is the skeleton (fixed bone lengths), `src/body.js` gives it a body, clothes and equipment as one mesh, `src/stage.js` draws it with WebGL 2 (one light, soft shadows), `src/form.js` holds poses, steps, words and muscles per exercise, `src/views/clip.js` is the player. Nothing is downloaded.
 
 - A pose gives hips, torso, hands and ankles; elbows and knees are solved (two-bone inverse kinematics), so limbs cannot stretch.
-- Every part is a sweep of rings along a path. Outlines and colours are worked out once per clip; only positions change, about 0.2 ms per frame on the Mac.
-- Working muscles are tinted blue on the body, helping ones light blue. Weights are yellow.
+- Every part is a sweep of rings along a path. Outlines and colours are worked out once per clip; only positions change, about 0.4 ms per frame on the Mac.
+- Muscles are drawn as anatomy: each in its own shape, with fibres, deep red if it works and paler red if it helps. A muscle is one or more sheets laid over the body part it belongs to (`SHAPES` in `src/body.js`), so it bends with the body. Weights are yellow, the dotted path is grey.
 - Words, breath and a bar follow the rep: lift 1.2 s, lower 2.4 s, hold 0.7 s at each end. Drag turns the figure, a tap pauses it. With Reduce Motion, start and end are shown as stills.
 - One graphics context is shared by the whole app and copied to the page's canvas. WebKit allows 16, and does not free them when a page is left.
 - `test/form.test.js` checks every clip at 41 moments: bone lengths, knees, floor, hands on the weight, what must stay still, smoothness, both sides alike, and that the clip shows what its steps say. A new clip needs the same.
@@ -123,6 +123,7 @@ In `src/build.js`, covered by `test/build.test.js`. The user picks exercises the
 
 ## Tried and dropped
 
+- Working muscles as a soft blue tint on cloth and skin: the user wanted muscle colour and muscle shape. It read as patches, not as muscles.
 - Flat black silhouettes for the form clips, drawn on a 2D canvas: the user found them crude and hard to read. Overlapping limbs merged and grip could not be shown.
 - One graphics context per clip, released on leaving: WebKit still ran out after 16 pages.
 - Saturated yellow `#ffd60a` and cobalt blue `#1a4fe0` with white text on blue: replaced by pastels at the user's request.
@@ -167,3 +168,4 @@ Stopped: the limit of 3 iterations. 3 iterations, 3 kept, 0 dropped.
 Focus, in the user's words: the face looks creepy, the eyeballs look like they are popping out; and the muscles should be drawn in muscle colour and shape instead of the blue material. At most 3 iterations. The user chose: anatomy red with fibres for working muscles, paler red for helping ones, and the dotted path kept, in grey.
 
 1. Kept: the eyes lie in the face instead of being balls with hoods in front of it, and the brows, sockets, nose and mouth are softer. Found by the user. Proof: the face test now says nothing in an eye is more than 0.4 off the skin (old: 1.01, it failed there), and renders from four sides in light and dark, lying and bent over. The review kept it; its notes on a raised, glossy iris and on a test exemption that skipped it are fixed. Known: each clip's framing moves by up to 4 px when the number of points in the figure changes, since it frames from every ninth point.
+2. Kept: each working muscle is drawn in its own shape with fibres in deep red, helping ones in paler red, and the dotted path is grey. Asked for by the user. Cable Crunch starts turned 14 degrees further so its abs show. Proof: a test that every muscle is a sheet in its own place on the standing figure, that none slides round the body during a rep, that the shoulder is on top of the arm as a press starts and beside the head overhead, that cloth and skin carry no tint, and that the key under the clip has the same colours. The check that counted blue points counts red ones, since the colour is the user's decision. The first version was sent back by the review: the shoulder slid 135 degrees round the arm and the test could not see it, the glutes were two stacked humps, and the abs, forearms and upper chest were wrong; all reworked. The second review kept it, with polish left (below). Cost: 0.34 to 0.39 ms to build a frame on the Mac (0.41 when the review measured it), 8.5 KB, at most 17,424 points a clip (cap 16,000 to 20,000).

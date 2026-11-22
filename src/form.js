@@ -160,7 +160,7 @@ export const FORM = {
 
   'cable-crunch': {
     say: ['Crunch', 'Uncurl'],
-    yaw: -24,
+    yaw: -38,
     works: ['abs'],
     steps: [
       'Kneel facing the cable. Hold the rope beside your head and keep your hips still.',

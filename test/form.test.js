@@ -2,7 +2,8 @@
 // clip at 41 moments of the movement.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BONE, CYCLE, add, cross, dot, len, mix, phase, solve, sub, unit } from '../src/figure.js';
+import { readFileSync } from 'node:fs';
+import { BONE, CYCLE, add, cross, dir, dot, len, mix, phase, solve, sub, unit } from '../src/figure.js';
 import { CAP, MUSCLES, STRIDE, build, createMesh } from '../src/body.js';
 import { FORM } from '../src/form.js';
 import { EXERCISES, ROUTINES } from '../src/seed.js';
@@ -144,17 +145,17 @@ test('the body is whole: finite, outward normals, both sides alike', () => {
     for (const t of [0, 0.5, 1]) {
       const m = at(t);
       assert.ok(m.n <= CAP && m.m % 3 === 0 && m.m > 30000, `${id} size: ${m.n} points`);
-      let blue = 0;
+      let red = 0;
       let z = 0;
       for (let i = 0; i < m.n; i++) {
         const o = i * STRIDE;
         for (let a = 0; a < STRIDE; a++) assert.ok(Number.isFinite(m.v[o + a]), `${id} at ${t}, point ${i}`);
         near(Math.hypot(m.v[o + 3], m.v[o + 4], m.v[o + 5]), 1, 1e-3, `${id} normal ${i}`);
-        if (m.v[o + 8] > 0.8 && m.v[o + 6] < 0.45) blue++;
+        if (m.v[o + 6] - m.v[o + 7] > 0.35 && m.v[o + 8] < 0.35) red++;
         z += m.v[o + 2];
       }
       assert.ok(Math.abs(z / m.n) < 0.4, `${id} is the same on both sides: ${z / m.n}`);
-      assert.ok(blue > 30, `${id} shows the working muscle: ${blue} points`);
+      assert.ok(red > 30, `${id} shows the working muscle: ${red} points`);
     }
   }
 });
@@ -317,6 +318,97 @@ test('the head has a face, and the hair covers it', () => {
       if (y < 7) continue;
       const at = add(add(add(j.head, front, x), j.headUp, y), [0, 0, z]);
       assert.ok(inside(m, hair, at), `${id}: the scalp shows at ${[x, y, z].map((n) => n.toFixed(1))}`);
+    }
+  }
+});
+
+test('a muscle is a sheet in its own place, not a tint on the skin', () => {
+  // Every muscle on the figure standing straight, seen from its hips and shoulders.
+  const { rdl } = FORM;
+  const j = solve(rdl.pose(0));
+  for (const name of MUSCLES) {
+    const clip = { ...rdl, works: [name], helps: [] };
+    const m = build(createMesh(), clip, j, 0);
+    const sheets = m.parts.filter((p) => p.want);
+    assert.ok(sheets.length >= 2 && sheets.length % 2 === 0, `${name} has sheets on both sides`);
+    let sum = [0, 0, 0];
+    let n = 0;
+    for (const { base, rows, cols } of sheets) {
+      for (let i = base; i < base + rows * cols; i++, n++) sum = add(sum, m.v.subarray(i * STRIDE, i * STRIDE + 3));
+      // It lies on the body: the middle of it is never under the skin.
+      const middle = m.v.subarray((base + (rows >> 1) * cols + (cols >> 1)) * STRIDE);
+      for (const part of m.parts.filter((p) => [36, 22, 24].includes(p.cols))) {
+        assert.ok(!inside(m, part, [middle[0], middle[1], middle[2]]), `${name} shows`);
+      }
+    }
+    const [x, y] = sum.map((v) => v / n);
+    const [hip, knee, ankle, neck] = [j.hip[1], j.knee[1], j.ankle[1], j.spine[3][1]];
+    const where = {
+      quads: [1, knee, hip], hamstrings: [-1, knee, hip], glutes: [-1, knee, hip + 8], calves: [-1, ankle, knee],
+      chest: [1, j.spine[1][1], neck], abs: [1, hip, j.spine[2][1]], lats: [-1, hip, neck], 'upper back': [-1, j.spine[1][1], neck + 4], 'lower back': [-1, hip, j.spine[2][1]],
+      shoulders: [0, j.elbow[1], neck], biceps: [1, j.elbow[1], j.shoulder[1]], triceps: [-1, j.elbow[1], j.shoulder[1]], forearms: [0, j.hand[1], j.elbow[1]],
+    }[name];
+    assert.ok(y > where[1] && y < where[2], `${name} is at ${y.toFixed(0)}, not between ${where[1].toFixed(0)} and ${where[2].toFixed(0)}`);
+    const line = ['biceps', 'triceps'].includes(name) ? mix(j.shoulder, j.elbow, 0.5) : name === 'calves' ? mix(j.knee, j.ankle, 0.3) : ['quads', 'hamstrings'].includes(name) ? mix(j.hip, j.knee, 0.5) : mix(j.spine[0], j.spine[3], Math.min(1, Math.max(0, (y - hip) / (neck - hip))));
+    if (where[0]) assert.ok((x - line[0]) * where[0] > 2, `${name} is on the ${where[0] > 0 ? 'front' : 'back'}`);
+  }
+  // A muscle never slides on the body: the skin under its middle is the same all through.
+  for (const [id, at] of Object.entries(meshes)) {
+    const under = (t) => {
+      const m = at(t);
+      const skin = m.parts.filter((p) => [36, 22, 24].includes(p.cols));
+      return m.parts.filter((p) => p.want).map(({ base, rows, cols }) => {
+        const o = (base + (rows >> 1) * cols + (cols >> 1)) * STRIDE;
+        const p = [m.v[o], m.v[o + 1], m.v[o + 2]];
+        let best = [Infinity];
+        for (const q of skin) for (let i = q.base; i < q.base + q.rows * q.cols; i++) {
+          const d = dist(p, m.v.subarray(i * STRIDE, i * STRIDE + 3));
+          if (d < best[0]) best = [d, q.cols, Math.floor((i - q.base) / q.cols), (i - q.base) % q.cols];
+        }
+        return best;
+      });
+    };
+    const start = under(0);
+    for (const t of [0.25, 0.5, 0.75, 1]) {
+      under(t).forEach(([, cols, , col], n) => {
+        if (start[n][1] !== cols) return; // another part lies nearer, as in a bent hip
+        const round = Math.abs(col - start[n][3]);
+        assert.ok(Math.min(round, cols - round) <= cols / 8, `${id}: sheet ${n} slid ${((Math.min(round, cols - round) / cols) * 360).toFixed(0)} degrees round by ${t}`);
+      });
+    }
+  }
+  // Where the shoulder sits on the arm: on top as a press starts, on the side of the head overhead.
+  const cap = (t) => {
+    const m = meshes['db-shoulder-press'](t);
+    const k = solve(FORM['db-shoulder-press'].pose(t));
+    const arm = unit(sub(k.elbow, k.shoulder));
+    let sum = [0, 0, 0];
+    for (const { base, rows, cols } of m.parts.filter((p) => p.want === 'works')) {
+      for (let i = base; i < base + rows * cols; i++) {
+        const from = sub(m.v.subarray(i * STRIDE, i * STRIDE + 3), k.shoulder);
+        if (m.v[i * STRIDE + 2] > 0) sum = add(sum, sub(from, arm.map((v) => v * dot(from, arm))));
+      }
+    }
+    return unit(sum);
+  };
+  assert.ok(cap(0)[1] > 0.6, `shoulder on top at the start: ${cap(0)}`);
+  assert.ok(cap(1)[2] < -0.5, `shoulder beside the head at the end: ${cap(1)}`);
+  // Cloth and skin keep their own colour, and the key under the clip has the colour of the muscle.
+  const css = readFileSync(new URL('../src/ui.css', import.meta.url), 'utf8');
+  for (const [id, at] of Object.entries(meshes)) {
+    const m = at(0);
+    for (const p of m.parts.filter((q) => [36, 22, 24].includes(q.cols))) {
+      for (let i = p.base; i < p.base + p.rows * p.cols; i++) {
+        const [r, g, b] = m.v.subarray(i * STRIDE + 6, i * STRIDE + 9);
+        assert.ok(r - g < 0.25 && b - r < 0.25, `${id}: the skin is tinted`);
+      }
+    }
+    for (const want of ['works', ...(FORM[id].helps ? ['helps'] : [])]) {
+      const hex = css.match(new RegExp(`--clip-${want}: (#[0-9a-f]{6})`))[1];
+      const key = [1, 3, 5].map((n) => parseInt(hex.slice(n, n + 2), 16) / 255);
+      const part = m.parts.find((p) => p.want === want);
+      const colors = Array.from({ length: part.rows * part.cols }, (_, i) => m.v.subarray((part.base + i) * STRIDE + 6, (part.base + i) * STRIDE + 9));
+      assert.ok(colors.some((c) => dist(c, key) < 0.02), `${id}: the key for ${want} has the colour of the muscle`);
     }
   }
 });

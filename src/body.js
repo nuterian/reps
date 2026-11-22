@@ -2,10 +2,10 @@
 // mesh rebuilt for each moment. Pure: no DOM, no WebGL.
 // Every part is a sweep: rings of points along a path. A part says where each
 // point is and what colour it has; normals come from the neighbours.
-import { add, sub, dot, cross, len, mix, unit, square, flip, dir } from './figure.js';
+import { add, sub, dot, cross, len, mix, unit, square, flip, dir, solve } from './figure.js';
 
 export const STRIDE = 10; // position 3, normal 3, colour 3, gloss 1
-export const CAP = 16000; // most points a mesh can hold
+export const CAP = 20000; // most points a mesh can hold
 
 // A mesh belongs to one clip: what never changes during a rep (the outline of
 // each ring, colours, triangles) is worked out the first time and kept.
@@ -17,9 +17,9 @@ const finish = (mesh) => { if (!mesh.m) for (const p of mesh.parts) triangles(me
 
 const TAU = 2 * Math.PI;
 
-function triangles(mesh, { base, rows, cols }) {
+function triangles(mesh, { base, rows, cols, open }) {
   for (let r = 0; r < rows - 1; r++) {
-    for (let k = 0; k < cols; k++) {
+    for (let k = 0; k < (open ? cols - 1 : cols); k++) {
       const a = base + r * cols + k;
       const b = base + r * cols + ((k + 1) % cols);
       mesh.i.set([a, a + cols, b, b, a + cols, b + cols], mesh.m);
@@ -116,6 +116,7 @@ function sweep(mesh, us, cols, ring, shape, paint) {
     }
   }
   mesh.n += rows * cols;
+  return part;
 }
 
 const steps = (from, to, n) => Array.from({ length: n }, (_, i) => from + ((to - from) * i) / (n - 1));
@@ -137,6 +138,15 @@ function profile(table) {
   };
 }
 
+// A smooth curve through points, one for each whole number of u.
+function spline(points, u) {
+  const last = points.length - 1;
+  const i = Math.min(last - 1, Math.floor(u));
+  const k = u - i;
+  const [p, a, b, q] = [-1, 0, 1, 2].map((n) => points[Math.min(last, Math.max(0, i + n))]);
+  return a.map((x, n) => x + 0.5 * k * (b[n] - p[n] + k * (2 * p[n] - 5 * x + 4 * b[n] - q[n] + k * (3 * (x - b[n]) + q[n] - p[n]))));
+}
+
 const bump = (x, width) => Math.exp(-((x / width) ** 2));
 // How much angle a points toward angle b, 0 to 1, sharper with k.
 const toward = (a, b, k = 2) => Math.max(0, Math.cos(a - b)) ** k;
@@ -145,20 +155,11 @@ const blend = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
 const C = {
   skin: hex('#cf9f7f'), hair: hex('#2b2320'), lips: hex('#bd8170'), white: hex('#f0ebe6'), iris: hex('#3a281e'), top: hex('#525b6d'), shorts: hex('#262a33'), shoe: hex('#3a404b'), sole: hex('#f3f4f6'), sock: hex('#eceef2'),
-  works: hex('#3f78ff'), helps: hex('#a9c4ff'),
-  steel: hex('#b4bac5'), pad: hex('#697180'), load: hex('#ffdc55'), hub: hex('#9aa0ab'), cable: hex('#3a3f48'), rope: hex('#e8dcc0'), dot: hex('#3f78ff'),
+  works: hex('#b23a34'), worksDark: hex('#8a2422'), helps: hex('#e79a90'), helpsDark: hex('#cf7a72'), tendon: hex('#efd9cb'),
+  steel: hex('#b4bac5'), pad: hex('#697180'), load: hex('#ffdc55'), hub: hex('#9aa0ab'), cable: hex('#3a3f48'), rope: hex('#e8dcc0'), dot: hex('#8a909c'),
 };
 
 const easeIn = (x, lo, hi) => { const k = Math.min(1, Math.max(0, (x - lo) / (hi - lo))); return k * k * (3 - 2 * k); };
-
-// Tints a surface by the muscles under it. masks: name -> 0..1.
-function tint(base, mark, masks) {
-  let c = base;
-  for (const want of ['helps', 'works']) {
-    for (const n of Object.keys(masks)) if (mark[n] === want) c = blend(c, C[want], easeIn(masks[n], 0.22, 0.62) * (want === 'works' ? 0.95 : 0.8));
-  }
-  return c;
-}
 
 // --- limbs -----------------------------------------------------------------
 
@@ -204,7 +205,7 @@ function limb(mesh, a, j, b, way, us, cols, radius, paint, root = null) {
     }
   }
   const last = us.length - 1;
-  sweep(mesh, us, cols, (u, r) => rings[r], (u, angle, r) => {
+  return sweep(mesh, us, cols, (u, r) => rings[r], (u, angle, r) => {
     const round = Math.min(1, Math.sqrt(Math.max(0, Math.min(u - us[0], us[last] - u)) / 0.1));
     const rad = r === 0 || r === last ? 0.01 : radius(u, angle, r) * round;
     return [Math.cos(angle) * rad, Math.sin(angle) * rad, 0];
@@ -222,19 +223,19 @@ const ARM = {
 };
 const SLEEVE = 0.4;
 const ARM_U = hemmed(-1, 2.04, 44, [SLEEVE]);
-const masks = (set, u, a) => Object.fromEntries(Object.entries(set).map(([n, f]) => [n, f(u, a)]));
 
-function arms(mesh, j, mark) {
+function arms(mesh, j) {
   // Rings before the hem are cloth; the doubled ring after it is skin.
   const cloth = (r) => r <= ARM_U.indexOf(SLEEVE);
   const radius = (u, a, r) => armR(u)[0] + 0.45 * ARM.shoulders(u, a) + 0.9 * ARM.biceps(u, a) + 0.7 * ARM.triceps(u, a) + 0.35 * ARM.forearms(u) + (cloth(r) ? 0.5 : 0);
-  const paint = (u, a, r) => [tint(cloth(r) ? C.top : C.skin, mark, masks(ARM, u, a)), cloth(r) ? 0.03 : 0.12];
+  const paint = (u, a, r) => [cloth(r) ? C.top : C.skin, cloth(r) ? 0.03 : 0.12];
   const along = unit(sub(j.hand, j.elbow));
   const root = add(mix(j.spine[3], j.spine[2], 0.5), [0, 0, 5]);
-  for (const m of [(p) => p, flip]) {
-    limb(mesh, m(j.shoulder), m(j.elbow), m(add(j.hand, along, -1.2)), m(j.elbowWay), ARM_U, 22, radius, paint, m(root));
+  return [(p) => p, flip].map((m) => {
+    const part = limb(mesh, m(j.shoulder), m(j.elbow), m(add(j.hand, along, -1.2)), m(j.elbowWay), ARM_U, 22, radius, paint, m(root));
     fist(mesh, m(j.hand), m(along), m(j.grip));
-  }
+    return part;
+  });
 }
 
 // A closed hand around a bar along `grip`.
@@ -259,16 +260,17 @@ const HEM = 0.6;
 const SOCK = 1.8;
 const LEG_U = hemmed(-0.18, 2.06, 46, [HEM, SOCK]);
 
-function legs(mesh, j, mark) {
+function legs(mesh, j) {
   const cloth = (r) => r <= LEG_U.indexOf(HEM);
   const sock = (r) => r > LEG_U.indexOf(SOCK);
   const radius = (u, a, r) => legR(u)[0] + 0.9 * LEG.quads(u, a) + 0.8 * LEG.hamstrings(u, a) + LEG.glutes(u, a) + 1.3 * LEG.calves(u, a)
     + 0.5 * bump(u - 1, 0.07) * toward(a, 0, 2) + (cloth(r) ? 0.4 + 0.35 * u : sock(r) ? 0.25 : 0);
-  const paint = (u, a, r) => [sock(r) ? C.sock : tint(cloth(r) ? C.shorts : C.skin, mark, masks(LEG, u, a)), cloth(r) ? 0.03 : 0.12];
-  for (const m of [(p) => p, flip]) {
-    limb(mesh, m(j.hip), m(j.knee), m(j.ankle), m(j.kneeWay), LEG_U, 24, radius, paint);
+  const paint = (u, a, r) => [sock(r) ? C.sock : cloth(r) ? C.shorts : C.skin, cloth(r) ? 0.03 : 0.12];
+  return [(p) => p, flip].map((m) => {
+    const part = limb(mesh, m(j.hip), m(j.knee), m(j.ankle), m(j.kneeWay), LEG_U, 24, radius, paint);
     shoe(mesh, m(j.ankle), m(j.toe), m(j.sole));
-  }
+    return part;
+  });
 }
 
 // Distance from the ankle toward the toes: half width, height.
@@ -313,12 +315,12 @@ const WAIST = 0.34;
 const COLLAR = 3.28;
 const TORSO_U = hemmed(-0.62, 4.1, 54, [WAIST, COLLAR]);
 
-function torso(mesh, j, mark) {
+function torso(mesh, j) {
   const { spine, angles } = j;
   const neckAngle = angles[2] + j.headTurn;
   const shorts = (r) => r <= TORSO_U.indexOf(WAIST);
   const shirt = (r) => !shorts(r) && r <= TORSO_U.indexOf(COLLAR);
-  sweep(mesh, TORSO_U, 36, (u) => {
+  return sweep(mesh, TORSO_U, 36, (u) => {
     let c;
     if (u <= 0) c = add(spine[0], dir(angles[0]), u * 13.5);
     else if (u >= 3) c = mix(spine[3], j.head, (u - 3) * 0.9);
@@ -337,7 +339,7 @@ function torso(mesh, j, mark) {
     const swell = 1.2 * TORSO.chest(u, a) + 0.5 * TORSO.lats(u, a) + 1.2 * TORSO.glutes(u, a) + 0.3 * TORSO['upper back'](u, a)
       - 0.5 * bump(u - 1.6, 0.9) * toward(a, Math.PI, 20) + (shirt(r) ? 0.35 : shorts(r) ? 0.55 : 0);
     return [ca * ((ca > 0 ? f : b) * full + swell), sa * (w * full + swell * 0.5), 0];
-  }, (u, a, r) => [tint(shorts(r) ? C.shorts : shirt(r) ? C.top : C.skin, mark, masks(TORSO, u, a)), shorts(r) || shirt(r) ? 0.03 : 0.12]);
+  }, (u, a, r) => [shorts(r) ? C.shorts : shirt(r) ? C.top : C.skin, shorts(r) || shirt(r) ? 0.03 : 0.12]);
 }
 
 // The head is fixed to the skeleton: x is forward, y is up from its middle and
@@ -348,13 +350,7 @@ const SKULL = [
   [-2.2, 6.4, -5.9, 5.15], [-0.2, 6.5, -6.9, 5.35], [1.8, 6.8, -7.4, 5.6], [3.8, 6.7, -7.5, 5.7], [5.5, 6, -7.1, 5.45], [7, 4.7, -6.1, 4.7], [8.2, 2.9, -4.6, 3.4], [8.9, 1.1, -2.7, 1.7], [9.15, -0.8, -0.8, 0],
 ];
 const CROWN = SKULL.length - 1;
-// A smooth curve through the rings.
-function skullRing(u) {
-  const i = Math.min(CROWN - 1, Math.floor(u));
-  const k = u - i;
-  const [p, a, b, q] = [-1, 0, 1, 2].map((n) => SKULL[Math.min(CROWN, Math.max(0, i + n))]);
-  return a.map((x, n) => x + 0.5 * k * (b[n] - p[n] + k * (2 * p[n] - 5 * x + 4 * b[n] - q[n] + k * (3 * (x - b[n]) + q[n] - p[n]))));
-}
+const skullRing = (u) => spline(SKULL, u);
 // How far the face stands out from the skull at a height and a distance from the middle.
 function relief(y, z) {
   const s = Math.abs(z);
@@ -483,6 +479,172 @@ function head(mesh, j) {
   }, (k, a) => [blend(C.hair, C.skin, 0.4 * (1 - easeIn(k, 0, 0.35)) * easeIn(turned(a), 0.9, 1.4)), 0.12]);
 }
 
+// --- muscles -------------------------------------------------------------------
+
+// A muscle is drawn as one or more sheets lying on the body, each between two
+// edges that run the way its fibres do. Edge points are [u, angle] on the part
+// the sheet lies on, for one side of the body; the other is its mirror. On the
+// torso, 0 is the front and pi the back; on a limb, 0 is the outside of the
+// bend, or for a shoulder the top of the arm.
+const PI = Math.PI;
+const spindle = (on, from, to, left, right, end = 0.4) => {
+  const mid = (left + right) / 2;
+  return { on, edges: [left, right].map((e) => [[0, end], [0.12, 0.75], [0.35, 1], [0.65, 1], [0.88, 0.75], [1, end]].map(([k, w]) => [from + (to - from) * k, mid + (e - mid) * w])) };
+};
+const block = (from, to) => ({ on: 'torso', plump: 0.5, edges: [[0.08, 0.05], [0.48, 0.56]].map(([end, mid]) => [[from, end], [from + 0.05, mid], [to - 0.05, mid], [to, end]]) });
+const SHAPES = {
+  chest: [{ on: 'torso', edges: [
+    [[2.9, 0.07], [3.02, 0.42], [2.92, 0.85], [2.6, 1.35]],
+    [[1.95, 0.07], [1.82, 0.4], [1.95, 0.85], [2.36, 1.35]]] }],
+  // The long muscle in its blocks, and the one that wraps the side.
+  abs: [...[[0.4, 0.8], [0.82, 1.2], [1.22, 1.58], [1.6, 1.92]].map(([a, b]) => block(a, b)), { on: 'torso', plump: 0.4, edges: [
+    [[1.75, 0.68], [1.2, 0.66], [0.8, 0.66], [0.42, 0.7]],
+    [[1.85, 1.2], [1.35, 1.6], [0.85, 1.6], [0.42, 1.3]]] }],
+  lats: [{ on: 'torso', edges: [
+    [[1.7, PI - 0.1], [2, PI - 0.5], [2.25, PI - 1], [2.45, 1.5]],
+    [[0.62, PI - 0.2], [1.1, PI - 0.85], [1.65, 1.75], [2.25, 1.45]]] }],
+  'upper back': [{ on: 'torso', edges: [
+    [[3.3, PI - 0.1], [3.02, PI - 0.5], [2.86, PI - 0.9], [2.72, 1.85]],
+    [[1.6, PI - 0.06], [2.12, PI - 0.35], [2.48, PI - 0.8], [2.6, 1.85]]] }],
+  'lower back': [{ on: 'torso', edges: [
+    [[0.36, PI - 0.08], [0.8, PI - 0.06], [1.3, PI - 0.06], [1.9, PI - 0.08]],
+    [[0.36, PI - 0.42], [0.8, PI - 0.56], [1.3, PI - 0.4], [1.9, PI - 0.12]]] }],
+  shoulders: [-1, 0, 1].map((h) => ({ on: 'arm', top: true, edges: [-0.54, 0.54].map((e) => [
+    [-0.5, 1.12 * h + e], [-0.1, 1.12 * h + e], [0.22, 0.85 * h + 0.85 * e], [0.54, 0.28 * h + 0.25 * e]]) })),
+  biceps: [spindle('arm', 0.2, 0.97, PI - 0.95, PI + 0.95, 0.25)],
+  triceps: [spindle('arm', 0.26, 0.88, -1.05, -0.05, 0.3), spindle('arm', 0.26, 0.88, 0.05, 1.05, 0.3)],
+  forearms: [PI - 0.5, PI + 0.5, 1.5, -1.5].map((m) => spindle('arm', 1.04, 1.66, m - 0.46, m + 0.46, 0.3)),
+  quads: [spindle('leg', 0.12, 0.9, -0.38, 0.38, 0.25), spindle('leg', 0.08, 0.95, -1.75, -0.42, 0.35), spindle('leg', 0.4, 0.99, 0.42, 1.2, 0.3)],
+  hamstrings: [spindle('leg', 0.16, 0.99, PI + 0.04, PI + 0.85, 0.3), spindle('leg', 0.16, 0.99, PI - 0.85, PI - 0.04, 0.3)],
+  calves: [spindle('leg', 1.04, 1.56, PI + 0.04, PI + 0.95, 0.3), spindle('leg', 1.04, 1.6, PI - 0.95, PI - 0.04, 0.3)],
+  // From the back of the pelvis to the outside of the thigh, across the hip.
+  glutes: [{ on: 'torso', to: 'leg', plump: 1.2, edges: [
+    [[0.42, PI - 0.5], [0.34, PI - 0.95], [0.12, PI - 1.2], [0, PI - 1.3], [-0.1, PI - 1.3]],
+    [[0.2, PI - 0.1], [-0.12, PI - 0.1], [-0.4, PI - 0.14], [-0.5, PI - 0.3], [-0.5, PI - 0.4]]], far: [
+    [[-0.17, PI + 0.6], [-0.15, PI + 0.9], [-0.05, PI + 1.2], [0.1, PI + 1.3], [0.38, PI + 1.05]],
+    [[-0.17, PI - 0.8], [-0.1, PI - 0.9], [0.06, PI - 0.85], [0.2, PI - 0.5], [0.38, PI + 0.75]]] }],
+};
+
+// A sheet of rows along the fibres by cols across them, laid over parts that
+// are already built: each point is a fixed blend of four of their points, or
+// of eight where the sheet crosses from one part to the next, so it moves with
+// the body and never slides on it. One that crosses the hip is also kept outside
+// the thigh, which turns up into it as the hip bends.
+const SHEET = { rows: 16, cols: 11, open: true };
+function sheet(mesh, parents, shape, turn, want, thigh) {
+  const { v } = mesh;
+  const { rows, cols } = SHEET;
+  const base = mesh.n;
+  const size = rows * cols;
+  let part = mesh.parts[mesh.part++];
+  if (!part) {
+    const many = parents.length * 4;
+    part = { ...SHEET, base, want, many, from: new Uint16Array(size * many), share: new Float32Array(size * many), lift: new Float32Array(size) };
+    mesh.parts.push(part);
+    for (let i = 0; i < size; i++) {
+      const s = Math.floor(i / cols) / (rows - 1);
+      const w = (i % cols) / (cols - 1);
+      const over = easeIn(s, 0.3, 0.75);
+      parents.forEach(([parent, us, edges], n) => {
+        const [u, angle] = mix(...edges.map((e) => spline(e, s * (e.length - 1))), w);
+        const row = Math.max(0, Math.min(us.length - 2, us.findLastIndex((x) => x <= u)));
+        const p = Math.min(1, Math.max(0, (u - us[row]) / (us[row + 1] - us[row] || 1)));
+        const round = (((angle + turn) / TAU) % 1 + 1) % 1 * parent.cols;
+        const col = Math.floor(round) % parent.cols;
+        const next = (col + 1) % parent.cols;
+        const q = round - Math.floor(round);
+        const near = parent.base + row * parent.cols;
+        const much = parents.length === 1 ? 1 : n ? over : 1 - over;
+        part.from.set([near + col, near + next, near + parent.cols + col, near + parent.cols + next], i * many + n * 4);
+        part.share.set([(1 - p) * (1 - q), (1 - p) * q, p * (1 - q), p * q].map((x) => x * much), i * many + n * 4);
+      });
+      part.lift[i] = 0.22 + (shape.plump ?? 0.75) * Math.sqrt(Math.max(0, 1 - (2 * w - 1) ** 2)) * Math.sin(PI * s) ** 0.5;
+      // Fibres: every other line is darker. The ends pale into tendon.
+      const tendon = Math.max(0, 1 - Math.min(s, 1 - s) / 0.1);
+      v.set([...blend(blend(C[want], C[`${want}Dark`], i % cols % 2 ? 0 : 0.75), C.tendon, 0.45 * tendon), 0.18], (base + i) * STRIDE + 6);
+    }
+  }
+  const { from, share, lift, many } = part;
+  for (let i = 0; i < size; i++) {
+    const o = (base + i) * STRIDE;
+    let x = 0, y = 0, z = 0, nx = 0, ny = 0, nz = 0;
+    for (let n = i * many; n < (i + 1) * many; n++) {
+      const f = from[n] * STRIDE;
+      const k = share[n];
+      x += k * v[f];
+      y += k * v[f + 1];
+      z += k * v[f + 2];
+      nx += k * v[f + 3];
+      ny += k * v[f + 4];
+      nz += k * v[f + 5];
+    }
+    const l = lift[i] / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1);
+    x += nx * l;
+    y += ny * l;
+    z += nz * l;
+    if (thigh) {
+      const [hip, knee] = thigh;
+      const bone = sub(knee, hip);
+      const u = Math.max(0, dot(sub([x, y, z], hip), bone) / dot(bone, bone));
+      const out = sub([x, y, z], add(hip, bone, u));
+      const room = legR(u)[0] + 1.4 + 0.5 * lift[i];
+      if (len(out) < room) [x, y, z] = add(add(hip, bone, u), out, room / len(out));
+      z = Math.sign(hip[2]) * Math.max(0.5, z * Math.sign(hip[2]));
+    }
+    v[o] = x;
+    v[o + 1] = y;
+    v[o + 2] = z;
+    v[o + 3] = nx;
+    v[o + 4] = ny;
+    v[o + 5] = nz;
+  }
+  for (let r = 0; r < rows; r++) {
+    for (let k = 0; k < cols; k++) {
+      const o = (base + r * cols + k) * STRIDE;
+      const a = (base + Math.max(0, r - 1) * cols + k) * STRIDE;
+      const b = (base + Math.min(rows - 1, r + 1) * cols + k) * STRIDE;
+      const c = (base + r * cols + Math.max(0, k - 1)) * STRIDE;
+      const d = (base + r * cols + Math.min(cols - 1, k + 1)) * STRIDE;
+      const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2];
+      const wx = v[d] - v[c], wy = v[d + 1] - v[c + 1], wz = v[d + 2] - v[c + 2];
+      let nx = wy * uz - wz * uy, ny = wz * ux - wx * uz, nz = wx * uy - wy * ux;
+      let l = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (l < 1e-5) {
+        [nx, ny, nz] = [v[o + 3], v[o + 4], v[o + 5]];
+        l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      } else if (nx * v[o + 3] + ny * v[o + 4] + nz * v[o + 5] < 0) l = -l;
+      v[o + 3] = nx / l;
+      v[o + 4] = ny / l;
+      v[o + 5] = nz / l;
+    }
+  }
+  mesh.n += size;
+}
+
+const US = { torso: TORSO_U, arm: ARM_U, leg: LEG_U };
+
+// The angle round the arm that faces up, out and forward.
+function topOfArm(j) {
+  const along = unit(sub(j.elbow, j.shoulder));
+  const face = square(j.elbowWay, along);
+  const top = square(add(add(dir(j.angles[2]), [0, 0, 1]), j.front[2]), along);
+  return Math.atan2(-dot(top, cross(along, face)), dot(top, face));
+}
+
+function muscles(mesh, clip, j, on) {
+  for (const want of ['helps', 'works']) {
+    for (const shape of (clip[want] ?? []).flatMap((n) => SHAPES[n])) {
+      const turn = shape.top ? topOfArm(solve(clip.pose(0))) : 0;
+      for (const side of [0, 1]) {
+        // The torso carries both sides, a limb its own.
+        const parents = [[shape.on, shape.edges], ...(shape.to ? [[shape.to, shape.far]] : [])].map(([name, edges]) => [on[name][side] ?? on[name][0], US[name],
+          name === 'torso' && side ? edges.map((e) => e.map(([u, a]) => [u, -a])) : edges]);
+        sheet(mesh, parents, shape, turn, want, shape.to && [j.hip, j.knee].map((q) => (side ? flip(q) : q)));
+      }
+    }
+  }
+}
+
 // --- equipment ---------------------------------------------------------------
 
 // Descriptions only; build() turns them into triangles.
@@ -538,17 +700,15 @@ function equipment(mesh, g) {
 
 // --- the whole picture ---------------------------------------------------------
 
-export const MUSCLES = ['quads', 'hamstrings', 'glutes', 'calves', 'chest', 'abs', 'lats', 'upper back', 'lower back', 'shoulders', 'biceps', 'triceps', 'forearms'];
+export const MUSCLES = Object.keys(SHAPES);
 
 export function build(mesh, clip, j, t) {
   begin(mesh);
-  const mark = {};
-  for (const n of clip.helps ?? []) mark[n] = 'helps';
-  for (const n of clip.works) mark[n] = 'works';
-  torso(mesh, j, mark);
+  const on = { torso: [torso(mesh, j)] };
   head(mesh, j);
-  arms(mesh, j, mark);
-  legs(mesh, j, mark);
+  on.arm = arms(mesh, j);
+  on.leg = legs(mesh, j);
+  muscles(mesh, clip, j, on);
   for (const g of clip.gear(j, t)) equipment(mesh, g);
   finish(mesh);
   return mesh;
