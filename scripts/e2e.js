@@ -491,10 +491,10 @@ async function main() {
     assert.deepEqual((await p.locator('.exercise .plan li').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim()),
       ['Fri, Nov 640 kg 11 10 10', 'Mon, Nov 240 kg 10 10 10'], 'recent sessions, newest first');
     const picture = async () => (await p.locator('.clip canvas').screenshot()).toString('base64');
-    const word = p.locator('.say b');
     const heard = new Set();
     for (let i = 0; i < 60; i++) {
-      heard.add(`${await word.textContent()}/${await p.locator('.say span').first().textContent()}`);
+      // Both in one read: the rep can move on between two.
+      heard.add(await p.locator('.say').evaluate((el) => `${el.querySelector('b').textContent}/${el.querySelector('span').textContent}`));
       await p.waitForTimeout(90);
     }
     assert.deepEqual([...heard].sort(), ['Hold/', 'Lower/Slowly, breathe in', 'Push/Breathe out'], 'the words follow the rep');
