@@ -2,8 +2,8 @@
 // clip at 41 moments of the movement.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BONE, CYCLE, cross, dot, len, mix, phase, solve, sub, unit } from '../src/figure.js';
-import { MUSCLES, STRIDE, build, createMesh } from '../src/body.js';
+import { BONE, CYCLE, add, cross, dot, len, mix, phase, solve, sub, unit } from '../src/figure.js';
+import { CAP, MUSCLES, STRIDE, build, createMesh } from '../src/body.js';
 import { FORM } from '../src/form.js';
 import { EXERCISES, ROUTINES } from '../src/seed.js';
 
@@ -143,7 +143,7 @@ test('the body is whole: finite, outward normals, both sides alike', () => {
   for (const [id, at] of Object.entries(meshes)) {
     for (const t of [0, 0.5, 1]) {
       const m = at(t);
-      assert.ok(m.n < 14000 && m.m % 3 === 0 && m.m > 30000, `${id} size: ${m.n} points`);
+      assert.ok(m.n <= CAP && m.m % 3 === 0 && m.m > 30000, `${id} size: ${m.n} points`);
       let blue = 0;
       let z = 0;
       for (let i = 0; i < m.n; i++) {
@@ -238,12 +238,13 @@ function inside({ v }, { base, rows, cols }, q) {
 
 test('no cable or rope goes through the body', () => {
   // Parts by their points to a ring.
-  const body = { 36: 'torso', 30: 'head', 22: 'arm', 24: 'leg' };
+  const body = { 40: 'head', 38: 'hair', 22: 'arm', 24: 'leg', 36: 'torso' };
   const found = new Set();
   for (const [id, clip] of Object.entries(FORM)) {
     for (const t of [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1]) {
       const m = meshes[id](t);
       const j = solve(clip.pose(t));
+      for (const cols of Object.keys(body)) assert.ok(m.parts.some((p) => p.cols === +cols), `the ${body[cols]} is found`);
       const hands = [j.hand, [j.hand[0], j.hand[1], -j.hand[2]]];
       for (const g of clip.gear(j, t)) {
         if (!['cable', 'rope'].includes(g.kind)) continue;
@@ -264,4 +265,48 @@ test('no cable or rope goes through the body', () => {
     }
   }
   assert.deepEqual([...found], []);
+});
+
+test('the head has a face, and the hair covers it', () => {
+  for (const id of ['rdl', 'cable-crunch', 'incline-db-press']) {
+    const m = meshes[id](0.5);
+    const j = solve(FORM[id].pose(0.5));
+    const front = [j.headUp[1], -j.headUp[0], 0];
+    // A point in the head's own terms: forward, up, to the side.
+    const point = (i) => {
+      const p = sub(m.v.subarray(i * STRIDE, i * STRIDE + 3), j.head);
+      return [dot(p, front), dot(p, j.headUp), p[2]];
+    };
+    const [skin, hair] = [40, 38].map((cols) => m.parts.find((p) => p.cols === cols));
+    const points = Array.from({ length: skin.rows * skin.cols }, (_, i) => point(skin.base + i));
+    // The profile, from the chin up.
+    const line = points.filter(([x, , z]) => x > 2 && Math.abs(z) < 0.01);
+    const most = (lo, hi) => Math.max(...line.filter(([, y]) => y > lo && y < hi).map(([x]) => x));
+    const least = (lo, hi) => Math.min(...line.filter(([, y]) => y > lo && y < hi).map(([x]) => x));
+    assert.ok(most(-3.2, -1.8) > most(1.5, 3) + 1.2, `${id}: the nose stands out from the brow`);
+    assert.ok(least(-0.5, 1.5) < most(1.5, 3) - 0.1, `${id}: the nose starts below the brow`);
+    assert.ok(least(-5.3, -4.7) < Math.min(most(-4.8, -4.1), most(-6, -5.2)) - 0.1, `${id}: the mouth is a line between two lips`);
+    assert.ok(least(-6.8, -5.8) < Math.min(most(-6, -5.2), most(-8, -6.8)) - 0.1, `${id}: there is a chin below the lips`);
+    // Eyes: white with a dark middle, in front of the skin around them.
+    const tone = (i) => m.v.subarray(i * STRIDE + 6, i * STRIDE + 9);
+    const whites = Array.from({ length: m.n }, (_, i) => i).filter((i) => Math.min(...tone(i)) > 0.9 && dist(point(i), [5.2, 0.5, Math.sign(point(i)[2]) * 2.4]) < 1.4);
+    assert.ok(whites.some((i) => point(i)[2] > 0) && whites.some((i) => point(i)[2] < 0), `${id}: two eyes`);
+    // Light falls on the outside: no point of the head faces into it.
+    for (const part of m.parts.slice(m.parts.indexOf(skin), m.parts.indexOf(hair) + 1)) {
+      const open = part.rows > 5 && part.rows < 9 && part.cols === 14; // eyeballs and lids are part of a ball
+      for (let i = part.base; !open && i < part.base + part.rows * part.cols; i++) {
+        const r = Math.floor((i - part.base) / part.cols);
+        if (part === hair && r < 2) continue; // the buried edge of an open shell
+        if (part.rows > 15 && r > 1 && r < part.rows - 2) continue; // the ends are where it is hard to tell
+        const o = i * STRIDE;
+        const out = add(m.v.subarray(o, o + 3), m.v.subarray(o + 3, o + 6), 0.04);
+        assert.ok(!inside(m, part, out), `${id}: part ${m.parts.indexOf(part)}, ring ${r} faces inward`);
+      }
+    }
+    for (const [x, y, z] of points) {
+      if (y < 7) continue;
+      const at = add(add(add(j.head, front, x), j.headUp, y), [0, 0, z]);
+      assert.ok(inside(m, hair, at), `${id}: the scalp shows at ${[x, y, z].map((n) => n.toFixed(1))}`);
+    }
+  }
 });

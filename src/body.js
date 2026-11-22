@@ -5,7 +5,7 @@
 import { add, sub, dot, cross, len, mix, unit, square, flip, dir } from './figure.js';
 
 export const STRIDE = 10; // position 3, normal 3, colour 3, gloss 1
-const CAP = 14000;
+export const CAP = 16000; // most points a mesh can hold
 
 // A mesh belongs to one clip: what never changes during a rep (the outline of
 // each ring, colours, triangles) is worked out the first time and kept.
@@ -26,6 +26,27 @@ function triangles(mesh, { base, rows, cols }) {
       mesh.m += 6;
     }
   }
+}
+
+// The normal at the tip of a closed end: square to the ring next to it, which
+// may be uneven, and away from that ring's middle.
+function tipNormal(v, ring, cols, [tx, ty, tz], [mx, my, mz]) {
+  let nx = 0, ny = 0, nz = 0;
+  let o = (ring + cols - 1) * STRIDE;
+  let px = v[o] - tx, py = v[o + 1] - ty, pz = v[o + 2] - tz;
+  for (let k = 0; k < cols; k++) {
+    o = (ring + k) * STRIDE;
+    const qx = v[o] - tx, qy = v[o + 1] - ty, qz = v[o + 2] - tz;
+    nx += py * qz - pz * qy;
+    ny += pz * qx - px * qz;
+    nz += px * qy - py * qx;
+    px = qx;
+    py = qy;
+    pz = qz;
+  }
+  const way = [tx - mx, ty - my, tz - mz];
+  const n = [nx, ny, nz];
+  return unit(len(n) < 1e-7 ? way : add([0, 0, 0], n, dot(n, way) < 0 ? -1 : 1));
 }
 
 // One part: rings of `cols` points, one for each u.
@@ -68,6 +89,7 @@ function sweep(mesh, us, cols, ring, shape, paint) {
     const down = base + Math.min(rows - 1, r + 1) * cols;
     const here = base + r * cols;
     const [mx, my, mz] = [mid[r * 3], mid[r * 3 + 1], mid[r * 3 + 2]];
+    let tip;
     for (let k = 0; k < cols; k++) {
       const a = (up + k) * STRIDE;
       const b = (down + k) * STRIDE;
@@ -82,10 +104,11 @@ function sweep(mesh, us, cols, ring, shape, paint) {
         // The tip of a closed end points along the path.
         let e = r ? r - 1 : 1;
         if (Math.abs(mx - mid[e * 3]) + Math.abs(my - mid[e * 3 + 1]) + Math.abs(mz - mid[e * 3 + 2]) < 1e-4) e = r * 2 < rows ? rows - 1 : 0;
-        nx = mx - mid[e * 3];
-        ny = my - mid[e * 3 + 1];
-        nz = mz - mid[e * 3 + 2];
-        l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        tip ??= tipNormal(v, base + e * cols, cols, [mx, my, mz], mid.subarray(e * 3, e * 3 + 3));
+        nx = tip[0];
+        ny = tip[1];
+        nz = tip[2];
+        l = 1;
       } else if (nx * (v[o] - mx) + ny * (v[o + 1] - my) + nz * (v[o + 2] - mz) < 0) l = -l;
       v[o + 3] = nx / l;
       v[o + 4] = ny / l;
@@ -121,7 +144,7 @@ const blend = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, 
 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
 const C = {
-  skin: hex('#cf9f7f'), hair: hex('#2b2320'), top: hex('#525b6d'), shorts: hex('#262a33'), shoe: hex('#3a404b'), sole: hex('#f3f4f6'), sock: hex('#eceef2'),
+  skin: hex('#cf9f7f'), hair: hex('#2b2320'), lips: hex('#b9796a'), white: hex('#f4f1ec'), iris: hex('#33241b'), top: hex('#525b6d'), shorts: hex('#262a33'), shoe: hex('#3a404b'), sole: hex('#f3f4f6'), sock: hex('#eceef2'),
   works: hex('#3f78ff'), helps: hex('#a9c4ff'),
   steel: hex('#b4bac5'), pad: hex('#697180'), load: hex('#ffdc55'), hub: hex('#9aa0ab'), cable: hex('#3a3f48'), rope: hex('#e8dcc0'), dot: hex('#3f78ff'),
 };
@@ -317,31 +340,122 @@ function torso(mesh, j, mark) {
   }, (u, a, r) => [tint(shorts(r) ? C.shorts : shirt(r) ? C.top : C.skin, mark, masks(TORSO, u, a)), shorts(r) || shirt(r) ? 0.03 : 0.12]);
 }
 
-// Height from the middle of the head: half width, depth, how far forward.
-const headR = profile([[-8.4, 0.3, 0.3, 3.2], [-7.6, 2.7, 2.7, 2.6], [-6, 4, 4.3, 1.7], [-3.5, 4.9, 5.8, 0.8], [-0.5, 5.4, 6.7, 0.2], [2.5, 5.7, 7.2, -0.2], [5.5, 5.3, 6.8, -0.4], [7.6, 3.9, 5, -0.5], [8.8, 1.8, 2.3, -0.5], [9.1, 0.05, 0.05, -0.5]]);
+// The head is fixed to the skeleton: x is forward, y is up from its middle and
+// z is to the near side. One ring of the skull per line, from under the chin to
+// the crown: height, front, back, half width.
+const SKULL = [
+  [-8.8, 4.2, 4.2, 0], [-8.45, 5.5, 2.6, 1.5], [-7.85, 6.3, 1.2, 2.5], [-6.9, 6.5, -0.6, 3.5], [-5.6, 6.4, -2.6, 4.3], [-4, 6.4, -4.4, 4.8],
+  [-2.2, 6.4, -5.9, 5.15], [-0.2, 6.5, -6.9, 5.35], [1.8, 6.8, -7.4, 5.6], [3.8, 6.7, -7.5, 5.7], [5.5, 6, -7.1, 5.45], [7, 4.7, -6.1, 4.7], [8.2, 2.9, -4.6, 3.4], [8.9, 1.1, -2.7, 1.7], [9.15, -0.8, -0.8, 0],
+];
+const CROWN = SKULL.length - 1;
+// A smooth curve through the rings.
+function skullRing(u) {
+  const i = Math.min(CROWN - 1, Math.floor(u));
+  const k = u - i;
+  const [p, a, b, q] = [-1, 0, 1, 2].map((n) => SKULL[Math.min(CROWN, Math.max(0, i + n))]);
+  return a.map((x, n) => x + 0.5 * k * (b[n] - p[n] + k * (2 * p[n] - 5 * x + 4 * b[n] - q[n] + k * (3 * (x - b[n]) + q[n] - p[n]))));
+}
+// How far the face stands out from the skull at a height and a distance from the middle.
+function relief(y, z) {
+  const s = Math.abs(z);
+  const at = (py, pz, hy, hz) => bump(y - py, hy) * bump(s - pz, hz);
+  const bridge = easeIn(y, -4.1, -2.1) * easeIn(-y, -2.6, -0.2) * (0.6 + 1.3 * easeIn(-y, -0.6, 2.4));
+  return bridge * bump(z, 0.85 + 0.35 * easeIn(-y, 0, 2.4)) + 0.5 * at(-2.4, 0, 0.8, 0.8) // nose
+    + 0.5 * at(-2.7, 1.15, 0.55, 0.45) // nostrils
+    + 0.5 * at(2.3, 2.4, 0.8, 1.9) + 0.35 * at(2, 0, 0.8, 1) - 0.35 * at(0.75, 0, 0.6, 1) // brow
+    - 0.95 * at(0.7, 2.4, 1.1, 1.4) // eye sockets
+    + 0.5 * at(-1.4, 3.7, 1.4, 1.4) - 0.4 * at(-4.3, 4, 1.6, 1.1) // cheeks
+    + 0.4 * at(-4.9, 0, 1.5, 2.1) - 0.15 * at(-3.9, 0, 0.5, 0.35) // mouth
+    + 0.22 * at(-4.5, 0.45, 0.4, 1) + 0.35 * at(-5.4, 0, 0.45, 1.2) - 0.34 * at(-5 + 0.07 * z * z, 0, 0.19, 1.6) // lips
+    - 0.4 * at(-6.2, 0, 0.5, 1.3) + 0.6 * at(-7.4, 0, 0.9, 1.5); // chin
+}
+// A point of the head, on the skull at ring u and angle a, pushed out by `out`.
+function skull(u, a, out = 0) {
+  const [y, f, b, w] = skullRing(u);
+  const [ca, sa] = [Math.cos(a), Math.sin(a)];
+  const full = (Math.abs(ca) ** 2.3 + Math.abs(sa) ** 2.3) ** (-1 / 2.3);
+  const z = sa * full * w;
+  const face = out ? 0 : relief(y, z) * easeIn(ca, 0, 0.45) * easeIn(u, 0, 1);
+  return [(f + b) / 2 + ca * (full * (f - b) / 2 + out) + face, y, z + sa * out];
+}
+
+// The point of the face at a height and a distance from the middle.
+function onFace(y, z) {
+  const find = (lo, hi, low) => {
+    for (let i = 0; i < 20; i++) [lo, hi] = low((lo + hi) / 2) ? [(lo + hi) / 2, hi] : [lo, (lo + hi) / 2];
+    return lo;
+  };
+  const u = find(0, CROWN, (m) => skullRing(m)[0] < y);
+  const [x] = skull(u, find(0, 1.5, (m) => skull(u, m)[2] < z));
+  return [x, y, z];
+}
+let brow; // worked out for the first clip, so launch does not pay for it
+const browLine = () => steps(0, 1, 9).map((k) => onFace(2.1 + 0.5 * Math.sin(k * 2.4), 1.05 + 2.8 * k));
+
+// Rings and columns crowd toward the face, where the detail is.
+const FACE_U = [...steps(0, 1, 4), ...steps(1.4, 2.8, 4), ...steps(3.1, 5.6, 18), ...steps(5.8, 9.2, 17), ...steps(9.8, CROWN, 5)];
+const faceward = (a) => a - 0.6 * Math.sin(a);
+
+// Up the face and over, how high the hair starts. It drops in front of the ear,
+// clears it, and falls to the nape.
+const HAIRLINE = profile([[0, 9.75], [0.5, 9.85], [0.85, 9.6], [1.1, 8.6], [1.3, 7.1], [1.5, 6.9], [1.62, 8.1], [2.05, 7.2], [2.4, 5.4], [3.2, 5.0]]);
+const HAIR_K = [0, 0.01, 0.04, 0.1, ...steps(0.18, 1, 14)];
 
 function head(mesh, j) {
-  const up = j.headUp;
+  const { head: at, headUp: up } = j;
   const front = [up[1], -up[0], 0];
-  const side = [0, 0, 1];
-  sweep(mesh, steps(-8.4, 9.1, 30), 30, (y) => [add(j.head, up, y), front, side], (y, a) => {
-    const [w, d, fwd] = headR(y);
-    const nose = 1.5 * bump(y + 1.6, 1.4) * toward(a, 0, 50) + 0.3 * bump(y - 0.8, 0.8) * toward(a, 0, 5);
-    const ear = 0.9 * bump(y + 0.4, 1.4) * Math.max(toward(a, 1.75, 30), toward(a, -1.75, 30));
-    return [Math.cos(a) * (d + nose) + fwd, Math.sin(a) * (w + ear), 0];
-  }, () => [C.skin, 0.12]);
-  for (const z of [2.4, -2.4]) {
-    const eye = add(add(add(j.head, up, 1.1), front, 5.9), side, z);
-    lathe(mesh, add(eye, up, -0.65), add(eye, up, 0.65), [[0, 0.01], [0.25, 0.55], [0.5, 0.68], [0.75, 0.55], [1, 0.01]], 8, C.hair, 0.3);
+  // Every part is fixed to the head: point(u, angle, r) is [x, y, z].
+  const part = (us, cols, point, paint) => sweep(mesh, us, cols, () => [at, front, up, [0, 0, 1]], point, paint);
+  // A cap of a ball around `way`, out to `spread` from it.
+  const cap = (c, way, radius, spread, rows, paint) => {
+    const axis = unit(way);
+    const e1 = square([0, 0, 1], axis);
+    const e2 = cross(axis, e1);
+    part(steps(0, spread, rows), 14, (q, a) => add(add(add(c, axis, radius * Math.cos(q)), e1, radius * Math.sin(q) * Math.cos(a)), e2, radius * Math.sin(q) * Math.sin(a)), () => paint);
+  };
+
+  part(FACE_U, 40, (u, a) => skull(u, faceward(a)), (u, a) => {
+    const [x, y, z] = skull(u, faceward(a));
+    const lips = x > 0 ? easeIn(bump(y + 5, 0.75) * bump(z, 1.75), 0.4, 0.85) : 0;
+    return [blend(C.skin, C.lips, lips), 0.12];
+  });
+
+  for (const s of [1, -1]) {
+    const eye = [5.2, 0.5, 2.4 * s];
+    cap(eye, [1, 0, 0.12 * s], 1.15, 1.77, 6, [C.white, 0.4]);
+    cap(add(eye, [0.06, 0, 0]), [1, 0, 0.12 * s], 1.15, 0.64, 4, [C.iris, 0.6]);
+    cap(eye, [-0.4, 0.91, -0.1 * s], 1.28, 1.7, 8, [C.skin, 0.12]);
+    cap(eye, [-0.4, -0.92, 0.1 * s], 1.22, 1.37, 7, [C.skin, 0.12]);
+
+    // Brow.
+    part(steps(0, 1, 9), 8, (k, a, r) => {
+      const [x, y, z] = (brow ??= browLine())[r];
+      const thick = r % 8 ? Math.sqrt(Math.min(1, (1 - k) / 0.6, 0.3 + k / 0.3)) : 0.02;
+      const out = 0.16 * thick * Math.sin(a);
+      return [x + out, y + 0.34 * thick * Math.cos(a), (z + 0.35 * k * out) * s];
+    }, () => [C.hair, 0.05]);
+
+    // Ear: a thin shell inside a rim that curls round to the lobe.
+    const shell = (a, r, lift) => [-1 + r * (Math.cos(a) * 1.25 - Math.sin(a) * 0.4), -0.4 + r * Math.sin(a) * 2.05, 5.1 + r * (0.55 - 0.65 * Math.cos(a)) + lift];
+    const onSide = ([x, y, z]) => [x, y, z * s];
+    part([0, 1, 2, 3, 4], 14, (u, a) => onSide(shell(a, [0.02, 0.5, 0.95, 0.9, 0.02][u], [0.75, 0.3, -0.2, -0.6, -0.8][u])), () => [blend(C.skin, C.hair, 0.15), 0.05]);
+    part(steps(0, 1, 16), 8, (k, a, r) => {
+      const round = -0.5 + 5.2 * k;
+      const [x, y] = unit(sub(shell(round, 1, 0), shell(round, 0.5, 0)));
+      const thick = r % 15 ? 0.3 + 0.18 * Math.sin(k * 3) + 0.3 * bump(k - 0.93, 0.1) : 0.02;
+      return onSide(add(shell(round, 0.95, 0.2), [x * Math.cos(a), y * Math.cos(a), Math.sin(a)], thick));
+    }, () => [C.skin, 0.1]);
   }
-  // Hair: a cap over the skull, down to a line that drops toward the nape.
-  sweep(mesh, steps(0, 1, 14), 30, () => [j.head, front, side, up], (k, a, r) => {
-    const low = 4.4 - 7.2 * easeIn(-Math.cos(a), -0.35, 0.55);
-    const y = low + (9.5 - low) * k;
-    const [w, d, fwd] = headR(Math.min(y, 9.05));
-    const thick = r === 0 ? -0.3 : 0.55;
-    return [Math.cos(a) * Math.max(0.02, d + thick) + fwd, Math.sin(a) * Math.max(0.02, w + thick), r === 13 ? 9.6 : y];
-  }, () => [C.hair, 0.2]);
+
+  // Hair: a short cut, cropped close at the sides.
+  const turned = (a) => Math.abs(Math.atan2(Math.sin(a), Math.cos(a)));
+  part(HAIR_K, 38, (k, angle, r) => {
+    const a = angle - 0.25 * Math.sin(2 * angle);
+    const low = HAIRLINE(turned(a))[0];
+    const u = low + (CROWN - low) * k;
+    const thick = r ? (0.15 + easeIn(k, -0.05, 0.4) * (0.15 + 0.8 * easeIn(u, 7, 10.8))) * (1 - easeIn(u, 12.2, CROWN)) : -0.4;
+    return add(skull(u, a, thick), [0, 0.75 * easeIn(u, 9.6, 13), 0]);
+  }, (k, a) => [blend(C.hair, C.skin, 0.4 * (1 - easeIn(k, 0, 0.35)) * easeIn(turned(a), 0.9, 1.4)), 0.12]);
 }
 
 // --- equipment ---------------------------------------------------------------
