@@ -52,10 +52,11 @@ export function solve(pose) {
   const head = add(spine[3], headUp, BONE.neck);
   const hip = add(spine[0], [0, 0, HIP_Z]);
   const hand = typeof pose.hand === 'function' ? pose.hand({ shoulder, head, headUp, spine }) : pose.hand;
+  const grip = typeof pose.grip === 'function' ? pose.grip({ hand }) : pose.grip ?? [0, 0, 1];
   const elbowWay = typeof pose.elbow === 'function' ? pose.elbow({ shoulder, hand, headUp }) : pose.elbow;
   return {
     spine, angles, front, head, headUp, headTurn: pose.head ?? 0, shoulder, hip, hand,
-    grip: unit(pose.grip ?? [0, 0, 1]),
+    grip: unit(grip),
     ankle: pose.ankle,
     elbow: bend(shoulder, hand, BONE.upper, BONE.fore, elbowWay),
     knee: bend(hip, pose.ankle, BONE.thigh, BONE.shin, pose.knee),

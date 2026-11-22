@@ -6,13 +6,20 @@
 // equipment for the solved joints. track: the point whose path is dotted.
 // lowersFirst: the rep starts by lowering the weight. say: the word for going
 // out and for coming back. yaw: the camera's turn to start with.
-import { add, dir, len, mix, sub } from './figure.js';
+import { add, dir, len, mix, sub, unit } from './figure.js';
 import { disc, dumbbells, pad, rod, sides } from './body.js';
 
 const hands = (j) => j.hand;
 const behind = (j, at, by) => add(j.spine[at], j.front[Math.min(at, 2)], -by);
 const onArc = (pivot, r, deg) => add(pivot, dir(deg), r);
 const floorSeat = (x, y) => [pad('pad', [x - 10, y], [x + 14, y], 11), rod('steel', [x, y - 3, 0], [x, 2, 0], 2.4)];
+
+// Where the two straps of the crunch rope, each 28 long, meet the cable.
+const PULLEY = [146, 112, 0];
+const ropeKnot = (hand) => {
+  const mid = [hand[0], hand[1], 0];
+  return add(mid, unit(sub(PULLEY, mid)), Math.sqrt(28 ** 2 - hand[2] ** 2));
+};
 
 export const FORM = {
   'leg-press': {
@@ -165,7 +172,9 @@ export const FORM = {
       torso: mix(20, 48, t),
       curl: mix(2, 86, t),
       head: mix(8, 22, t),
-      hand: ({ head, headUp }) => add(add(add([head[0], head[1], 10], [headUp[1], -headUp[0], 0], 7), headUp, -4), [0, 0, 0]),
+      // Beside the head, so the straps of the rope pass either side of it.
+      hand: ({ head, headUp }) => add([head[0], head[1], 11.5], [headUp[1], -headUp[0], 0], 2),
+      grip: ({ hand }) => sub(ropeKnot(hand), hand),
       elbow: ({ headUp }) => add([headUp[1], -headUp[0], 0.35], headUp, -1),
       ankle: [68, 5, 8],
       knee: [1, -0.3, 0],
@@ -173,12 +182,12 @@ export const FORM = {
     }),
     track: hands,
     gear: (j, t) => {
-      const knot = add([j.hand[0], j.hand[1], 0], sub([146, 112, 0], [j.hand[0], j.hand[1], 0]), 16 / len(sub([146, 112, 0], [j.hand[0], j.hand[1], 0])));
+      const knot = ropeKnot(j.hand);
       return [
         pad('pad', [58, 0], [112, 0], 18, 1.4),
         rod('steel', [158, 2, 0], [158, 116, 0], 2.2),
         rod('steel', [158, 114, 0], [146, 114, 0], 1.8),
-        rod('cable', knot, [146, 112, 0], 0.7),
+        rod('cable', knot, PULLEY, 0.7),
         ...sides((s) => rod('rope', knot, [j.hand[0], j.hand[1], j.hand[2] * s], 1.3)),
       ];
     },

@@ -2,11 +2,12 @@
 // clip at 41 moments of the movement.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BONE, CYCLE, dot, len, mix, phase, solve, sub } from '../src/figure.js';
+import { BONE, CYCLE, cross, dot, len, mix, phase, solve, sub, unit } from '../src/figure.js';
 import { MUSCLES, STRIDE, build, createMesh } from '../src/body.js';
 import { FORM } from '../src/form.js';
 import { EXERCISES, ROUTINES } from '../src/seed.js';
 
+const TAU = 2 * Math.PI;
 const TIMES = Array.from({ length: 41 }, (_, i) => i / 40);
 const each = (fn) => {
   for (const [id, clip] of Object.entries(FORM)) for (const t of TIMES) fn(id, solve(clip.pose(t)), t, clip);
@@ -214,4 +215,53 @@ test('no point of the body or the machine snaps from place to place', () => {
       before = m.v.slice(0, m.n * STRIDE);
     }
   }
+});
+
+// Whether a point is inside a closed part of the mesh: whether the part wraps around it.
+function inside({ v }, { base, rows, cols }, q) {
+  const all = Array.from({ length: rows * cols }, (_, i) => sub(v.subarray((base + i) * STRIDE, (base + i) * STRIDE + 3), q));
+  for (const a of [0, 1, 2]) if (all.every((p) => p[a] > 0) || all.every((p) => p[a] < 0)) return false;
+  let wraps = 0;
+  const tri = (a, b, c) => {
+    const [la, lb, lc] = [len(a), len(b), len(c)];
+    wraps += Math.atan2(dot(a, cross(b, c)), la * lb * lc + dot(a, b) * lc + dot(b, c) * la + dot(c, a) * lb) / TAU;
+  };
+  for (let r = 0; r < rows - 1; r++) {
+    for (let k = 0; k < cols; k++) {
+      const [a, b, c, d] = [[r, k], [r, k + 1], [r + 1, k], [r + 1, k + 1]].map(([row, col]) => all[row * cols + (col % cols)]);
+      tri(a, c, b);
+      tri(b, c, d);
+    }
+  }
+  return Math.abs(wraps) > 0.5;
+}
+
+test('no cable or rope goes through the body', () => {
+  // Parts by their points to a ring.
+  const body = { 36: 'torso', 30: 'head', 22: 'arm', 24: 'leg' };
+  const found = new Set();
+  for (const [id, clip] of Object.entries(FORM)) {
+    for (const t of [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1]) {
+      const m = meshes[id](t);
+      const j = solve(clip.pose(t));
+      const hands = [j.hand, [j.hand[0], j.hand[1], -j.hand[2]]];
+      for (const g of clip.gear(j, t)) {
+        if (!['cable', 'rope'].includes(g.kind)) continue;
+        const line = unit(sub(g.b, g.a));
+        const x = unit(cross(line, Math.abs(line[2]) > 0.9 ? [0, 1, 0] : [0, 0, 1]));
+        const y = cross(line, x);
+        for (let i = 0; i <= 24; i++) {
+          const c = mix(g.a, g.b, i / 24);
+          if (hands.some((h) => dist(h, c) < 5)) continue; // the hand closes around it
+          for (const [cos, sin] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+            const q = c.map((n, a) => n + (x[a] * cos + y[a] * sin) * g.r);
+            for (const part of m.parts) {
+              if (body[part.cols] && inside(m, part, q)) found.add(`${id}: the ${g.kind} is in the ${body[part.cols]} at ${t}`);
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual([...found], []);
 });
