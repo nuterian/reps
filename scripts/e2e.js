@@ -515,7 +515,7 @@ async function main() {
       const [F, B, S, { FORM: forms }] = await Promise.all(['figure', 'body', 'stage', 'form'].map(at));
       const canvas = Object.assign(document.createElement('canvas'), { width: 600, height: 460 });
       const stage = S.createStage(canvas);
-      const draw = (change, shift = 0, clip = forms.rdl, turn = 0) => {
+      const draw = (change, shift = 0, clip = forms.rdl, turn = 0, path = []) => {
         const mesh = B.build(B.createMesh(), clip, F.solve(clip.pose(0)), 0);
         const cloud = Array.from({ length: mesh.n }, (_, i) => mesh.v.slice(i * B.STRIDE, i * B.STRIDE + 3));
         for (let i = 0; i < mesh.n; i++) {
@@ -523,7 +523,7 @@ async function main() {
           mesh.v[i * B.STRIDE] += shift;
         }
         const camera = S.frameCamera(cloud.map(([x, y, z]) => [x + shift, y, z]), clip.yaw + turn, 10, 600 / 460);
-        stage.draw(mesh, B.dots(B.createMesh(), []), camera, { dark: false, reach: 90 });
+        stage.draw(mesh, B.dots(B.createMesh(), path), camera, { dark: false, reach: 90 });
         const flat = Object.assign(document.createElement('canvas'), { width: 600, height: 460 }).getContext('2d');
         flat.drawImage(canvas, 0, 0);
         return flat.getImageData(0, 0, 600, 460).data;
@@ -539,9 +539,11 @@ async function main() {
         }
         return sum / n;
       };
-      return { plain: apart(draw((v) => { v[9] = 0; })), grain: apart(draw((v) => v.fill(0, 10))), moved: apart(draw(() => {}, 7.3)), white: draw(() => {}, 0, forms['leg-press'], -90).reduce((n, x, i, d) => n + (i % 4 === 3 && x === 255 && Math.min(d[i - 1], d[i - 2], d[i - 3]) > 240 ? 1 : 0), 0) };
+      const spine = F.solve(forms.rdl.pose(0)).spine;
+      const [behind, before] = [spine, spine.map(([x, y]) => [x - 17, y + 5, 25])].map((path) => apart(draw(() => {}, 0, forms.rdl, 0, path)));
+      return { behind, before, plain: apart(draw((v) => { v[9] = 0; })), grain: apart(draw((v) => v.fill(0, 10))), moved: apart(draw(() => {}, 7.3)), white: draw(() => {}, 0, forms['leg-press'], -90).reduce((n, x, i, d) => n + (i % 4 === 3 && x === 255 && Math.min(d[i - 1], d[i - 2], d[i - 3]) > 240 ? 1 : 0), 0) };
     });
-    assert.ok(differ.plain > 8 && differ.grain > 1.5 && differ.moved < 0.8 && differ.white === 0, `materials: ${JSON.stringify(differ)}`);
+    assert.ok(differ.plain > 8 && differ.grain > 1.5 && differ.moved < 0.8 && differ.white === 0 && differ.behind < differ.before / 2, `materials: ${JSON.stringify(differ)}`);
     // In a hold the figure still breathes: the picture changes between two moments of it.
     const [early, late, word] = await p.evaluate(() => new Promise((done) => {
       const canvas = document.querySelector('.clip canvas');

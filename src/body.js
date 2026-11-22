@@ -60,7 +60,7 @@ function sweep(mesh, us, cols, ring, shape, paint, wound) {
   const base = mesh.n;
   let part = mesh.parts[mesh.part++];
   if (!part) {
-    part = { base, rows, cols, off: new Float32Array(rows * cols * 3) };
+    part = { base, rows, cols, off: new Float32Array(rows * cols * 3), at: new Float32Array(rows * 9) };
     mesh.parts.push(part);
     let along = 0;
     let before;
@@ -82,6 +82,7 @@ function sweep(mesh, us, cols, ring, shape, paint, wound) {
   const mid = new Float32Array(rows * 3);
   for (let r = 0; r < rows; r++) {
     const [c, x, y, z] = ring(us[r], r);
+    part.at.set([...c, ...x, ...y], r * 9);
     for (let k = 0; k < cols; k++) {
       const f = (r * cols + k) * 3;
       const o = (base + r * cols + k) * STRIDE;
@@ -500,6 +501,139 @@ function head(mesh, j) {
   }, (k, a) => [blend(C.hair, C.skin, 0.4 * (1 - easeIn(k, 0, 0.35)) * easeIn(turned(a), 0.9, 1.4)), M.hair]);
 }
 
+// --- where skin meets skin ------------------------------------------------------
+
+// The radius of a part by the angle round each of its rings, in BINS steps, and
+// the point of the ring there.
+const BINS = 48;
+function lookup(part) {
+  part.out = new Float32Array(part.rows * BINS);
+  part.who = new Uint16Array(part.rows * BINS);
+  const angle = new Float32Array(part.cols);
+  const size = new Float32Array(part.cols);
+  for (let r = 0; r < part.rows; r++) {
+    for (let k = 0; k < part.cols; k++) {
+      const x = part.off[(r * part.cols + k) * 3], y = part.off[(r * part.cols + k) * 3 + 1];
+      angle[k] = Math.atan2(y, x);
+      size[k] = Math.sqrt(x * x + y * y);
+    }
+    for (let b = 0; b < BINS; b++) {
+      let one = 0, two = 0, gap1 = Infinity, gap2 = Infinity;
+      for (let k = 0; k < part.cols; k++) {
+        let gap = Math.abs(angle[k] - ((b / BINS) * TAU - PI));
+        if (gap > PI) gap = TAU - gap;
+        if (gap < gap1) { two = one; gap2 = gap1; one = k; gap1 = gap; } else if (gap < gap2) { two = k; gap2 = gap; }
+      }
+      part.out[r * BINS + b] = size[one] + ((size[two] - size[one]) * gap1) / (gap1 + gap2 || 1);
+      part.who[r * BINS + b] = part.base + r * part.cols + one;
+    }
+  }
+}
+
+// How far a point is outside the skin of a part, between two of its rings, and
+// which way the skin there faces. Smooth in the point, so nothing hops.
+const found = { d: 0, x: 0, y: 0, z: 0 };
+function outside(mesh, part, px, py, pz, from, to, reach) {
+  if (!part.out) lookup(part);
+  const { at } = part;
+  const { v } = mesh;
+  let near = from;
+  let least = Infinity;
+  // Every fourth ring, then the ones around the nearest.
+  for (let pass = 0, r = from, end = to, by = 4; pass < 2; pass++) {
+    for (; r < end; r += by) {
+      const dx = px - at[r * 9], dy = py - at[r * 9 + 1], dz = pz - at[r * 9 + 2];
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < least) { least = d; near = r; }
+    }
+    if (least > (18 + reach) * (18 + reach)) { found.d = Infinity; return found; }
+    r = Math.max(from, near - 3);
+    end = Math.min(to, near + 4);
+    by = 1;
+  }
+  // Between which two rings it is, and how far along.
+  const o = near * 9;
+  const ox = px - at[o], oy = py - at[o + 1], oz = pz - at[o + 2];
+  let next = near, share = 0, past = 0;
+  for (let r = near - 1; r <= near + 1; r += 2) {
+    if (r < from || r >= to) continue;
+    const tx = at[r * 9] - at[o], ty = at[r * 9 + 1] - at[o + 1], tz = at[r * 9 + 2] - at[o + 2];
+    const tt = tx * tx + ty * ty + tz * tz || 1;
+    const k = (ox * tx + oy * ty + oz * tz) / tt;
+    if (k > share) { share = Math.min(1, k); next = r; }
+    // Beyond the first or last ring the skin ends: what is past it is that much further off.
+    if (k < 0 && (near === from || near === to - 1)) past = -k * Math.sqrt(tt);
+  }
+  const a = Math.max(from, near - 1) * 9;
+  const b = Math.min(to - 1, near + 1) * 9;
+  const tx = at[b] - at[a], ty = at[b + 1] - at[a + 1], tz = at[b + 2] - at[a + 2];
+  const tt = tx * tx + ty * ty + tz * tz || 1;
+  found.d = past;
+  found.x = found.y = found.z = 0;
+  for (let side = 0; side < (share ? 2 : 1); side++) {
+    const row = side ? next : near;
+    const much = side ? share : 1 - share;
+    const c = row * 9;
+    let qx = px - at[c], qy = py - at[c + 1], qz = pz - at[c + 2];
+    const along = (qx * tx + qy * ty + qz * tz) / tt;
+    qx -= along * tx;
+    qy -= along * ty;
+    qz -= along * tz;
+    const ax = at[c + 3], ay = at[c + 4], az = at[c + 5], bx = at[c + 6], by = at[c + 7], bz = at[c + 8];
+    const x = (qx * ax + qy * ay + qz * az) / (ax * ax + ay * ay + az * az);
+    const y = (qx * bx + qy * by + qz * bz) / (bx * bx + by * by + bz * bz);
+    const turn = ((Math.atan2(y, x) + PI) / TAU) * BINS;
+    const bin = Math.floor(turn);
+    const off = Math.sqrt(x * x + y * y);
+    for (let n = 0; n < 2; n++) {
+      const f = row * BINS + ((bin + n) % BINS);
+      const k = (n ? turn - bin : 1 - turn + bin) * much;
+      const w = part.who[f] * STRIDE;
+      found.d += k * (off - part.out[f]);
+      found.x += k * v[w + 3];
+      found.y += k * v[w + 4];
+      found.z += k * v[w + 5];
+    }
+  }
+  return found;
+}
+
+// Where part a (its rings from..to) comes within `soft` of part b (its rings
+// low..high), its skin swells to meet it and turns the same way, so the two read
+// as one. Both are moved from where they were, so do all of a joint at once.
+const moves = new Float32Array(7 * 4000);
+function weld(mesh, soft, ...pairs) {
+  const { v } = mesh;
+  let m = 0;
+  for (const [a, from, to, b, low, high] of pairs) {
+    const side = Math.sign(b.at[high * 9 - 7]); // of a limb; the torso is on neither
+    for (let r = from; r < to; r++) {
+      // Fades toward the last ring, so cloth of another colour keeps its edge.
+      const ends = Math.min(1, (to - r) / 4);
+      for (let i = a.base + r * a.cols; i < a.base + (r + 1) * a.cols; i++) {
+        const o = i * STRIDE;
+        if (v[o + 2] * side < -1) continue;
+        outside(mesh, b, v[o], v[o + 1], v[o + 2], low, high, soft);
+        if (found.d > soft || found.d < -soft) continue;
+        const k = (1 - Math.abs(found.d) / soft) * ends;
+        const h = 0.5 * k;
+        const x = v[o + 3] * (1 - h) + found.x * h, y = v[o + 4] * (1 - h) + found.y * h, z = v[o + 5] * (1 - h) + found.z * h;
+        const one = 1 / (Math.sqrt(x * x + y * y + z * z) || 1);
+        // Moves less near the middle of the body, where the other side does the same.
+        moves.set([o, x * one, y * one, z * one, (Math.min(1, Math.abs(v[o + 2]) / 3) * soft * k * k) / 4], m);
+        m += 5;
+      }
+    }
+  }
+  for (let n = 0; n < m; n += 5) {
+    const o = moves[n];
+    for (let x = 0; x < 3; x++) {
+      v[o + x] += moves[n + 1 + x] * moves[n + 4];
+      v[o + 3 + x] = moves[n + 1 + x];
+    }
+  }
+}
+
 // --- muscles -------------------------------------------------------------------
 
 // A muscle is drawn as one or more sheets lying on the body, each between two
@@ -579,7 +713,7 @@ function sheet(mesh, parents, shape, turn, want, thigh, effort) {
         part.from.set([near + col, near + next, near + parent.cols + col, near + parent.cols + next], i * many + n * 4);
         part.share.set([(1 - p) * (1 - q), (1 - p) * q, p * (1 - q), p * q].map((x) => x * much), i * many + n * 4);
       });
-      part.lift[i] = 0.22 + (shape.plump ?? 0.75) * Math.sqrt(Math.max(0, 1 - (2 * w - 1) ** 2)) * Math.sin(PI * s) ** 0.5;
+      part.lift[i] = (shape.to ? 0.5 : 0.22) + (shape.plump ?? 0.75) * Math.sqrt(Math.max(0, 1 - (2 * w - 1) ** 2)) * Math.sin(PI * s) ** 0.5;
       // Fibres: every other line is darker. The ends pale into tendon.
       const tendon = Math.max(0, 1 - Math.min(s, 1 - s) / 0.1);
       v.set([...blend(blend(C[want], C[`${want}Dark`], i % cols % 2 ? 0 : 0.75), C.tendon, 0.45 * tendon), M.muscle, w * 8, 0, s * 20], (base + i) * STRIDE + 6);
@@ -723,6 +857,22 @@ function equipment(mesh, g) {
   }
 }
 
+// Sleeves and shorts are one skin with the body, and thighs lie against each other.
+function touch(mesh, on) {
+  const [torso] = on.torso;
+  const row = (us, u) => us.findIndex((x) => x >= u);
+  const waist = row(TORSO_U, WAIST);
+  for (const arm of on.arm) weld(mesh, 3, [arm, row(ARM_U, -0.6), row(ARM_U, 0.5), torso, 2, torso.rows - 2], [torso, row(TORSO_U, 1), row(TORSO_U, 3.3), arm, 2, row(ARM_U, 0.5)]);
+  for (const [n, leg] of on.leg.entries()) {
+    weld(mesh, 2.8, [leg, row(LEG_U, -0.45), row(LEG_U, 0.5), torso, 2, waist], [torso, 0, waist, leg, 2, row(LEG_U, 0.5)]);
+    const side = n ? -1 : 1;
+    for (let i = leg.base; i < leg.base + leg.rows * leg.cols; i++) {
+      const z = mesh.v[i * STRIDE + 2] * side;
+      if (z < 1.5) mesh.v[i * STRIDE + 2] = (side * (z + Math.sqrt(z * z + 0.12))) / 2;
+    }
+  }
+}
+
 // --- the whole picture ---------------------------------------------------------
 
 export const MUSCLES = Object.keys(SHAPES);
@@ -733,6 +883,7 @@ export function build(mesh, clip, j, t) {
   head(mesh, j);
   on.arm = arms(mesh, j);
   on.leg = legs(mesh, j);
+  touch(mesh, on);
   muscles(mesh, clip, j, on);
   for (const g of clip.gear(j, t)) equipment(mesh, g);
   finish(mesh);

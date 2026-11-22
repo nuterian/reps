@@ -15,7 +15,7 @@ void main() {
 const FRAG = `#version 300 es
 precision highp float; precision highp sampler2DShadow;
 in vec3 P, N, R, K; in vec4 S; flat in int m;
-uniform vec3 eye, key; uniform sampler2DShadow map, under; uniform float mode, dark, reach; uniform vec2 size, middle;
+uniform vec3 eye, key; uniform sampler2DShadow map, under; uniform float mode, dark, reach, faint; uniform vec2 size, middle;
 out vec4 o;
 float lit() {
   vec3 q = S.xyz / S.w * .5 + .5; q.z -= .0015;
@@ -40,7 +40,7 @@ vec3 raised(vec3 n, float h) {
   return normalize(n - up * min(1., .5 / max(length(up), 1e-5)));
 }
 void main() {
-  if (mode > 1.5) { o = vec4(K, 1.); return; }
+  if (mode > 1.5) { o = vec4(K, 1.) * faint; return; }
   if (mode > .5) {
     float away = length(P.xz - middle) / reach;
     vec2 rim = gl_FragCoord.xy / size;
@@ -155,7 +155,7 @@ export function createStage(canvas) {
   }
   gl.linkProgram(program);
   gl.useProgram(program);
-  const at = Object.fromEntries(['view', 'light', 'depthOnly', 'eye', 'key', 'map', 'mode', 'dark', 'reach', 'middle', 'size', 'under'].map((n) => [n, gl.getUniformLocation(program, n)]));
+  const at = Object.fromEntries(['view', 'light', 'depthOnly', 'eye', 'key', 'map', 'mode', 'dark', 'reach', 'middle', 'size', 'under', 'faint'].map((n) => [n, gl.getUniformLocation(program, n)]));
 
   // Depth maps: from the light, and from under the floor looking up.
   const depthMap = (size) => {
@@ -261,9 +261,14 @@ export function createStage(canvas) {
       gl.uniform1f(at.mode, 0);
       gl.drawElements(gl.TRIANGLES, mesh.m, gl.UNSIGNED_SHORT, 0);
       path.load(dots);
-      gl.disable(gl.DEPTH_TEST);
+      // The path goes behind the body, where it stays as a trace.
       gl.uniform1f(at.mode, 2);
-      gl.drawElements(gl.TRIANGLES, dots.m, gl.UNSIGNED_SHORT, 0);
+      for (const [faint, test] of [[0.14, gl.ALWAYS], [1, gl.LEQUAL]]) {
+        gl.depthFunc(test);
+        gl.depthMask(test === gl.LEQUAL);
+        gl.uniform1f(at.faint, faint);
+        gl.drawElements(gl.TRIANGLES, dots.m, gl.UNSIGNED_SHORT, 0);
+      }
     },
   };
 }

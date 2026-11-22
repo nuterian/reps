@@ -253,6 +253,75 @@ test('thighs grow out of the hips, with no shelf, notch or fold where they meet'
   }
 });
 
+test('skin and cloth join smoothly, and thighs do not cross', () => {
+  const at = (m, i) => m.v.subarray(i * STRIDE, i * STRIDE + 3);
+  const normal = (m, i) => m.v.subarray(i * STRIDE + 3, i * STRIDE + 6);
+  // How sharply two parts meet: the angle between their skins where they touch, in the middle of the range.
+  const meet = (m, a, from, to, b) => {
+    const angles = [];
+    for (let i = a.base + from * a.cols; i < a.base + to * a.cols; i++) {
+      let best = [0.5];
+      for (let k = b.base + 2 * b.cols; k < b.base + (b.rows - 2) * b.cols; k++) {
+        const [p, q] = [at(m, i), at(m, k)];
+        const d = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
+        if (d < best[0]) best = [d, k];
+      }
+      if (best.length > 1) angles.push((Math.acos(Math.min(1, dot(normal(m, i), normal(m, best[1])))) * 180) / Math.PI);
+    }
+    angles.sort((x, y) => x - y);
+    assert.ok(angles.length > 3, 'they touch');
+    return angles[angles.length >> 1];
+  };
+  // Not where an arm only lies against the side, as in the row.
+  for (const [cols, from, to, most, when] of [[22, 14, 24, 45, { 'leg-press': 1, 'cable-crunch': 1, rdl: 0.5, 'seated-row': 1 }], [24, 14, 26, 60, { 'cable-crunch': 0, 'lat-pulldown': 0, 'leg-curl': 0, 'db-curl': 0 }]]) {
+    for (const [id, t] of Object.entries(when)) {
+      const m = build(createMesh(), FORM[id], solve(FORM[id].pose(t)), t);
+      const plain = m.parts.filter((p) => !p.want && p.rows > 30);
+      for (const limb of plain.filter((p) => p.cols === cols)) {
+        const angle = meet(m, limb, from, to, plain.find((p) => p.cols === 36));
+        assert.ok(angle < most, `${id} at ${t}: the ${cols === 22 ? 'sleeve' : 'leg'} meets the body at ${angle.toFixed(0)} degrees`);
+      }
+    }
+  }
+  for (const [id, clip] of Object.entries(FORM)) {
+    for (const t of [0, 0.5, 1]) {
+      const m = meshes[id](t);
+      const legs = m.parts.filter((p) => !p.want && p.cols === 24);
+      legs.forEach((leg, n) => {
+        for (let i = leg.base; i < leg.base + leg.rows * leg.cols; i++) assert.ok(at(m, i)[2] * (n ? -1 : 1) > -0.01, `${id} at ${t}: a leg crosses the middle`);
+      });
+      // A roller lies on the thighs.
+      for (const g of clip.gear(solve(clip.pose(t)), t).filter((x) => x.shape === 'rod' && x.kind === 'pad')) {
+        let gap = Infinity;
+        for (const leg of legs) for (let i = leg.base; i < leg.base + leg.rows * leg.cols; i++) {
+          const p = at(m, i);
+          if (Math.abs(p[2]) < Math.abs(g.a[2])) gap = Math.min(gap, Math.hypot(p[0] - g.a[0], p[1] - g.a[1]) - g.r);
+        }
+        assert.ok(Math.abs(gap) < 0.4, `${id}: the roller is ${gap.toFixed(2)} from the thigh`);
+      }
+    }
+  }
+  // Skin that is being joined moves as evenly as the pose does: no hopping.
+  for (const [id, part] of [['chest-press', 22], ['lat-pulldown', 22], ['lat-pulldown', 24], ['rdl', 36]]) {
+    const clip = FORM[id];
+    const frame = (n) => {
+      const now = alive(clip, n / 60);
+      const m = build(createMesh(), clip, solve(clip.pose(now.t), now), now.t);
+      const p = m.parts.find((q) => !q.want && q.cols === part);
+      return m.v.slice(p.base * STRIDE, (p.base + p.rows * p.cols) * STRIDE);
+    };
+    let [a, b] = [frame(0), frame(1)];
+    for (let n = 2; n < 300; n += 1) {
+      const c = frame(n);
+      for (let i = 0; i < c.length; i += STRIDE) {
+        const hop = Math.hypot(c[i] - 2 * b[i] + a[i], c[i + 1] - 2 * b[i + 1] + a[i + 1], c[i + 2] - 2 * b[i + 2] + a[i + 2]);
+        assert.ok(hop < 0.4, `${id}: skin hops by ${hop.toFixed(2)} at ${(n / 60).toFixed(2)}`);
+      }
+      [a, b] = [b, c];
+    }
+  }
+});
+
 test('no point of the body or the machine snaps from place to place', () => {
   for (const [id, at] of Object.entries(meshes)) {
     let before;
