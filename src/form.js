@@ -66,7 +66,7 @@ export const FORM = {
 
   'chest-press': {
     say: ['Press', 'Return'],
-    yaw: -38,
+    yaw: -55,
     works: ['chest'],
     helps: ['shoulders', 'triceps'],
     steps: [
@@ -100,7 +100,7 @@ export const FORM = {
 
   'seated-row': {
     say: ['Pull', 'Reach'],
-    yaw: 26,
+    yaw: 44,
     works: ['upper back', 'lats'],
     helps: ['biceps'],
     steps: [
@@ -289,7 +289,7 @@ export const FORM = {
 
   'leg-curl': {
     say: ['Curl', 'Lower'],
-    yaw: 20,
+    yaw: 32,
     works: ['hamstrings'],
     helps: ['calves'],
     steps: [
@@ -333,7 +333,7 @@ export const FORM = {
 
   'db-curl': {
     say: ['Curl', 'Lower'],
-    yaw: -36,
+    yaw: -64,
     works: ['biceps'],
     helps: ['forearms'],
     steps: [

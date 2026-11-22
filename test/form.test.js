@@ -526,6 +526,54 @@ test('a muscle is a sheet in its own place, not a tint on the skin', () => {
     }
     assert.ok(under < 6, `${id}: ${under} points of the glutes are under the skin`);
   }
+  // Muscles reach the bone they pull, on the right side of it: every sheet's last row, at rest and at work.
+  const ends = {
+    quads: (k) => [k.knee, [1, 0, 0]], hamstrings: (k) => [k.knee, [-1, 0, 0]], calves: (k) => [k.ankle, [-1, 0, 0]], biceps: (k) => [k.elbow, [1, 0, 0]], triceps: (k) => [k.elbow, [-1, 0, 0]],
+    forearms: (k) => [k.hand, [0, 1, 0]],
+    chest: (k) => [k.shoulder, [1, 0, 0]], lats: (k) => [k.shoulder, [0, 0, -1]], shoulders: (k) => [mix(k.shoulder, k.elbow, 0.5), [0, 0, 1]],
+  };
+  for (const [name, end] of Object.entries(ends)) {
+    for (const effort of [0, 0.8]) {
+      const k = solve(rdl.pose(0), { ...STILL, effort });
+      const m = build(createMesh(), { ...rdl, works: [name], helps: [] }, k, 0);
+      const sheets = m.parts.filter((p) => p.want);
+      const [bone, side] = end(k);
+      let sum = [0, 0, 0];
+      for (const { base, rows, cols } of sheets) {
+        const o = (base + (rows - 1) * cols + (cols >> 1)) * STRIDE;
+        const p = [m.v[o], m.v[o + 1], Math.abs(m.v[o + 2])];
+        assert.ok(dist(p, bone) < 8.5, `${name}: a sheet ends ${dist(p, bone).toFixed(1)} from its bone`);
+        sum = add(sum, sub(p, bone), 1 / sheets.length);
+      }
+      assert.ok(dot(sum, side) > 0.8, `${name} ends on the wrong side of its bone: ${sum.map((x) => x.toFixed(1))}`);
+    }
+  }
+  // Hamstrings come out from under the glutes, never over them.
+  {
+    const k = solve(rdl.pose(0));
+    const m = build(createMesh(), { ...rdl, works: ['glutes'], helps: ['hamstrings'] }, k, 0);
+    const points = (want) => m.parts.filter((p) => p.want === want && m.v[(p.base + 5) * STRIDE + 2] > 0).flatMap(({ base, rows, cols }) => Array.from({ length: rows * cols }, (_, i) => [...m.v.subarray((base + i) * STRIDE, (base + i) * STRIDE + 3)]));
+    const glutes = points('works');
+    for (const p of points('helps')) {
+      const over = glutes.filter((q) => Math.abs(q[1] - p[1]) < 1 && Math.abs(q[2] - p[2]) < 1);
+      assert.ok(!over.length || p[0] > Math.min(...over.map((q) => q[0])) - 0.5, `a hamstring lies over the glutes at ${p.map((x) => x.toFixed(0))}`);
+    }
+  }
+  // At work the red belly is shorter by a tenth or more, and nearer to where the muscle starts.
+  for (const name of ['quads', 'hamstrings', 'calves', 'biceps', 'triceps', 'chest', 'lats', 'glutes', 'shoulders']) {
+    const belly = (effort) => {
+      const k = solve(rdl.pose(0.5), { ...STILL, effort });
+      const m = build(createMesh(), { ...rdl, works: [name], helps: [] }, k, 0.5);
+      const { base, rows, cols } = m.parts.find((p) => p.want);
+      const red = Array.from({ length: rows }, (_, r) => r).filter((r) => {
+        const o = (base + r * cols + 5) * STRIDE + 6;
+        return m.v[o] - m.v[o + 1] > 0.3;
+      });
+      return [red.length, red.reduce((x, y) => x + y, 0) / red.length];
+    };
+    const [[long, low], [short, high]] = [belly(0), belly(0.85)];
+    assert.ok(short <= long * 0.9 && high < low, `${name}: ${long} rows of red at rest, ${short} at work`);
+  }
   // Where the shoulder sits on the arm: on top as a press starts, on the side of the head overhead.
   const cap = (t) => {
     const m = meshes['db-shoulder-press'](t);
@@ -671,17 +719,16 @@ test('the figure lives: it breathes as the words say, works its muscles, blinks,
     };
     assert.ok(depth(1) > depth(0) + 0.6, `${id}: the chest fills`);
   }
-  // A muscle that helps swells half as much as one that works.
-  const swell = (want) => {
+  // A muscle that helps works half as hard: at full effort it has the shape of one that works at half.
+  const shape = (want, effort) => {
     const clip = { ...FORM.rdl, works: [], helps: [], [want]: ['calves'] };
-    const middle = (effort) => {
-      const m = build(createMesh(), clip, solve(clip.pose(0), { ...STILL, effort }), 0);
-      const { base, rows, cols } = m.parts.find((p) => p.want);
-      return [...m.v.subarray((base + (rows >> 1) * cols + (cols >> 1)) * STRIDE)].slice(0, 3);
-    };
-    return dist(middle(0), middle(1));
+    const m = build(createMesh(), clip, solve(clip.pose(0), { ...STILL, effort }), 0);
+    const { base, rows, cols } = m.parts.find((p) => p.want);
+    return Array.from({ length: rows * cols }, (_, i) => [...m.v.subarray((base + i) * STRIDE)].slice(0, 3));
   };
-  near(swell('helps') / swell('works'), 0.5, 0.05, 'a helping muscle swells half as much');
+  const apart = (a, b) => Math.max(...a.map((p, i) => dist(p, b[i])));
+  near(apart(shape('helps', 1), shape('works', 0.5)), 0, 1e-6, 'a helping muscle works half as hard');
+  assert.ok(apart(shape('helps', 1), shape('works', 1)) > 0.2, 'and less hard than a working one');
   // Eyes: shut and open again within a quarter of a second, every few seconds.
   const tall = (blink) => {
     const { rdl } = FORM;

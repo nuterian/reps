@@ -637,43 +637,59 @@ function weld(mesh, soft, ...pairs) {
 // --- muscles -------------------------------------------------------------------
 
 // A muscle is drawn as one or more sheets lying on the body, each between two
-// edges that run the way its fibres do. Edge points are [u, angle] on the part
-// the sheet lies on, for one side of the body; the other is its mirror. On the
-// torso, 0 is the front and pi the back; on a limb, 0 is the outside of the
-// bend, or for a shoulder the top of the arm.
+// edges that run the way its fibres do, from where it starts to where it ends.
+// Edge points are [u, angle] on the part the sheet lies on, for one side of the
+// body; the other is its mirror. On the torso, 0 is the front and pi the back;
+// on a limb, 0 is the outside of the bend, or for a shoulder the top of the arm.
+// `cord` is how much of each end is tendon. `to` and `far` carry it on to the
+// next part.
 const PI = Math.PI;
-const spindle = (on, from, to, left, right, end = 0.4) => {
-  const mid = (left + right) / 2;
-  return { on, edges: [left, right].map((e) => [[0, end], [0.12, 0.75], [0.35, 1], [0.65, 1], [0.88, 0.75], [1, end]].map(([k, w]) => [from + (to - from) * k, mid + (e - mid) * w])) };
-};
-const block = (from, to) => ({ on: 'torso', plump: 0.5, swell: 1.5, edges: [[0.08, 0.05], [0.48, 0.56]].map(([end, mid]) => [[from, end], [from + 0.05, mid], [to - 0.05, mid], [to, end]]) });
+// Edge points a little apart from a middle line: [u, angle, half the width].
+const strip = (points) => [-1, 1].map((side) => points.map(([u, a, half]) => [u, a + side * half]));
+const both = (make) => [make(1), make(-1)];
+const block = (from, to) => ({ on: 'torso', plump: 0.5, swell: from > 1.5 ? 2.2 : 1.9, cord: [0.03, 0.03], pull: 0, edges: [[0.08, 0.05], [0.48, 0.56]].map(([end, mid]) => [[from, end], [from + 0.05, mid], [to - 0.05, mid], [to, end]]) });
 const SHAPES = {
-  chest: [{ on: 'torso', swell: 1.8, edges: [
-    [[2.9, 0.07], [3.02, 0.42], [2.92, 0.85], [2.6, 1.35]],
-    [[1.95, 0.07], [1.82, 0.4], [1.95, 0.85], [2.36, 1.35]]] }],
+  // The upper and the lower part, gathered to one cord at the front of the arm.
+  chest: [
+    { edges: [[[3, 0.1], [3.04, 0.5], [2.95, 0.95], [2.8, 1.3], [2.7, 1.5]], [[2.5, 0.06], [2.5, 0.45], [2.48, 0.9], [2.5, 1.25], [2.55, 1.5]]] },
+    { edges: [[[2.48, 0.06], [2.48, 0.45], [2.46, 0.9], [2.48, 1.25], [2.52, 1.5]], [[1.97, 0.07], [1.82, 0.42], [1.92, 0.85], [2.2, 1.25], [2.4, 1.5]]] },
+  ].map((x) => ({ ...x, on: 'torso', to: 'arm', cross: [0.6, 1], plump: 0.6, swell: 2.6, pull: 0.2, cord: [0.04, 0.06], far: [-1, 1].map((e) => [-0.2, -0.1, 0, 0.08, 0.16].map((u) => [u, PI + e * 0.4])) })),
   // The long muscle in its blocks, and the one that wraps the side.
-  abs: [...[[0.4, 0.8], [0.82, 1.2], [1.22, 1.58], [1.6, 1.92]].map(([a, b]) => block(a, b)), { on: 'torso', plump: 0.4, swell: 1.5, edges: [
-    [[1.75, 0.68], [1.2, 0.66], [0.8, 0.66], [0.42, 0.7]],
-    [[1.85, 1.2], [1.35, 1.6], [0.85, 1.6], [0.42, 1.3]]] }],
-  lats: [{ on: 'torso', edges: [
-    [[1.7, PI - 0.1], [2, PI - 0.5], [2.25, PI - 1], [2.45, 1.5]],
-    [[0.62, PI - 0.2], [1.1, PI - 0.85], [1.65, 1.75], [2.25, 1.45]]] }],
-  'upper back': [{ on: 'torso', edges: [
-    [[3.3, PI - 0.1], [3.02, PI - 0.5], [2.86, PI - 0.9], [2.72, 1.85]],
-    [[1.6, PI - 0.06], [2.12, PI - 0.35], [2.48, PI - 0.8], [2.6, 1.85]]] }],
-  'lower back': [{ on: 'torso', edges: [
+  abs: [...[[0.4, 0.8], [0.81, 1.2], [1.21, 1.58], [1.59, 1.92]].map(([a, b]) => block(a, b)), { on: 'torso', plump: 0.45, swell: 2.2, cord: [0.04, 0.01], pull: 0.06, fade: 0.08, edges: [
+    [[1.95, 1], [1.6, 0.7], [1.05, 0.62], [0.4, 0.6]],
+    [[1.85, 1.35], [1.4, 1.65], [0.9, 1.6], [0.4, 1.3]]] }],
+  lats: [{ on: 'torso', to: 'arm', cross: [0.65, 1], plump: 0.7, swell: 1.3, cord: [0.06, 0.04], edges: [
+    [[1.95, PI - 0.1], [2.1, PI - 0.5], [2.32, PI - 1], [2.5, 1.75], [2.55, 1.6]],
+    [[0.5, PI - 0.16], [0.95, PI - 0.7], [1.5, PI - 1.25], [2.05, 1.75], [2.35, 1.55]]], far: [-1.2, -2].map((e) => [-0.3, -0.2, -0.1, 0, 0.06].map((u) => [u, e])) }],
+  'upper back': [{ on: 'torso', swell: 1.2, cord: [0.06, 0.12], edges: [
+    [[3.05, PI - 0.07], [2.98, PI - 0.45], [2.86, PI - 0.9], [2.72, 1.85]],
+    [[1.6, PI - 0.06], [2.12, PI - 0.35], [2.48, PI - 0.8], [2.6, 1.85]]] }, { on: 'torso', aid: true, plump: 0.5, swell: 1, cord: [0.06, 0.12], edges: [
+    [[3.75, PI - 0.5], [3.45, PI - 0.75], [3.15, PI - 1.15], [2.94, 1.75]],
+    [[3.4, PI - 0.08], [3.08, PI - 0.42], [2.92, PI - 0.9], [2.76, 1.8]]] }],
+  'lower back': [{ on: 'torso', plump: 0.5, cord: [0.2, 0.15], pull: 0.15, edges: [
     [[0.36, PI - 0.08], [0.8, PI - 0.06], [1.3, PI - 0.06], [1.9, PI - 0.08]],
     [[0.36, PI - 0.42], [0.8, PI - 0.56], [1.3, PI - 0.4], [1.9, PI - 0.12]]] }],
-  shoulders: [-1, 0, 1].map((h) => ({ on: 'arm', top: true, edges: [-0.54, 0.54].map((e) => [
-    [-0.5, 1.12 * h + e], [-0.1, 1.12 * h + e], [0.22, 0.85 * h + 0.85 * e], [0.54, 0.28 * h + 0.25 * e]]) })),
-  biceps: [{ ...spindle('arm', 0.2, 0.97, PI - 0.95, PI + 0.95, 0.25), swell: 2 }],
-  triceps: [spindle('arm', 0.26, 0.88, -1.05, -0.05, 0.3), spindle('arm', 0.26, 0.88, 0.05, 1.05, 0.3)],
-  forearms: [PI - 0.5, PI + 0.5, 1.5, -1.5].map((m) => spindle('arm', 1.04, 1.66, m - 0.46, m + 0.46, 0.3)),
-  quads: [spindle('leg', 0.12, 0.9, -0.38, 0.38, 0.25), spindle('leg', 0.08, 0.95, -1.75, -0.42, 0.35), spindle('leg', 0.4, 0.99, 0.42, 1.2, 0.3)],
-  hamstrings: [spindle('leg', 0.16, 0.99, PI + 0.04, PI + 0.85, 0.3), spindle('leg', 0.16, 0.99, PI - 0.85, PI - 0.04, 0.3)],
-  calves: [spindle('leg', 1.04, 1.56, PI + 0.04, PI + 0.95, 0.3), spindle('leg', 1.04, 1.6, PI - 0.95, PI - 0.04, 0.3)],
+  shoulders: [-1, 0, 1].map((h) => ({ on: 'arm', top: true, base: 0.35, swell: 1, cord: [0.04, 0.08], pull: 0.2, edges: [-0.55, 0.55].map((e) => [
+    [-0.5, 1.12 * h + e], [-0.1, 1.12 * h + e], [0.22, 0.85 * h + 0.85 * e], [0.56, 0.28 * h + 0.25 * e]]) })),
+  biceps: [{ on: 'arm', base: 0.25, swell: 2.4, plump: 0.8, cord: [0.1, 0.16], pull: 0.3, edges: strip([[0.06, PI, 0.2], [0.24, PI, 0.8], [0.5, PI, 1], [0.72, PI, 0.9], [0.88, PI, 0.4], [1.02, PI, 0.14]]) }],
+  triceps: both((s) => ({ on: 'arm', base: 0.25, swell: 1.2, cord: [0.06, 0.3], edges: strip([[0.08, 0.3 * s, 0.1], [0.27, 0.54 * s, 0.48], [0.48, 0.6 * s, 0.58], [0.64, 0.5 * s, 0.46], [0.78, 0.26 * s, 0.24], [0.98, 0.1 * s, 0.09]]) })),
+  forearms: [0.95, 1.7, 2.45, 3.2, 3.95].map((a) => ({ on: 'arm', plump: 0.5, cord: [0.06, 0.34], edges: strip([[0.98, 0.5 * a + 0.5 * 2.45, 0.2], [1.12, a, 0.36], [1.3, a, 0.37], [1.5, a, 0.3], [1.68, a, 0.18], [1.86, a, 0.12]]) })),
+  // Three heads to one cord over the knee: the long one, the outer, the inner drop.
+  quads: [
+    { cord: [0.08, 0.2], edges: strip([[0.04, -0.04, 0.12], [0.2, -0.06, 0.36], [0.5, -0.05, 0.42], [0.74, -0.02, 0.3], [0.88, 0, 0.15], [1.02, 0, 0.1]]) },
+    { cord: [0.08, 0.14], edges: [[[0.05, -0.95], [0.2, -1.7], [0.5, -1.85], [0.74, -1.45], [0.87, -0.8], [0.98, -0.25]], [[0.05, -0.75], [0.2, -0.45], [0.5, -0.48], [0.74, -0.33], [0.88, -0.17], [0.98, -0.1]]] },
+    { cord: [0.1, 0.1], edges: [[[0.32, 0.5], [0.5, 0.38], [0.66, 0.31], [0.8, 0.23], [0.9, 0.16], [0.99, 0.1]], [[0.32, 0.56], [0.5, 1], [0.68, 1.38], [0.82, 1.35], [0.92, 0.9], [1, 0.25]]] },
+  ].map((x) => ({ ...x, on: 'leg', swell: 2.6, pull: 0.24 })),
+  // Two bundles that part above the knee, one cord each side of it.
+  hamstrings: both((s) => ({ on: 'leg', plump: 0.85, swell: 2, cord: [0.02, 0.22], pull: 0.22, edges: [
+    [[0.25, PI - 0.3 * s], [0.38, PI - 0.04 * s], [0.5, PI - 0.03 * s], [0.76, PI - 0.2 * s], [0.92, PI - 0.6 * s], [1.1, PI - 0.86 * s]],
+    [[0.25, PI - 0.55 * s], [0.38, PI - 0.98 * s], [0.5, PI - 1.02 * s], [0.76, PI - 1.05 * s], [0.92, PI - 1.04 * s], [1.1, PI - 1.04 * s]]] })),
+  // Two heads, the inner one lower, to the cord of the heel.
+  calves: both((s) => ({ on: 'leg', swell: 1.2, cord: [0.05, 0.42], edges: [
+    [[0.98, PI - 0.2 * s], [1.1, PI - 0.03 * s], [1.28, PI - 0.03 * s], [1.42, PI - 0.02 * s], [1.56, PI], [1.86, PI]],
+    [[0.98, PI - 0.6 * s], [1.1, PI - 0.98 * s], [1.28, PI - 1.08 * s], [1.42 + 0.02 * s, PI - 0.9 * s], [1.57 + 0.02 * s, PI - 0.3 * s], [1.86, PI - 0.2 * s]]] })),
   // From the back of the pelvis to the outside of the thigh, across the hip.
-  glutes: [{ on: 'torso', to: 'leg', plump: 1.2, edges: [
+  glutes: [{ on: 'torso', to: 'leg', plump: 0.75, swell: 1.3, cord: [0.04, 0], pull: 0.14, fade: 0.06, keep: true, base: 0.7, edges: [
     [[0.42, PI - 0.5], [0.34, PI - 0.95], [0.12, PI - 1.2], [0, PI - 1.3], [-0.1, PI - 1.3]],
     [[0.2, PI - 0.1], [-0.12, PI - 0.1], [-0.4, PI - 0.14], [-0.5, PI - 0.3], [-0.5, PI - 0.4]]], far: [
     [[-0.17, PI + 0.6], [-0.15, PI + 0.9], [-0.05, PI + 1.2], [0.1, PI + 1.3], [0.38, PI + 1.05]],
@@ -686,6 +702,7 @@ const SHAPES = {
 // the body and never slides on it. One that crosses the hip is also kept outside
 // the thigh, which turns up into it as the hip bends. It thickens with effort.
 const SHEET = { rows: 16, cols: 11, open: true };
+const ACROSS = Array.from({ length: SHEET.cols }, (_, k) => (1 - ((2 * k) / (SHEET.cols - 1) - 1) ** 2) ** 0.8);
 function sheet(mesh, parents, shape, turn, want, thigh, effort) {
   const { v } = mesh;
   const { rows, cols } = SHEET;
@@ -699,7 +716,7 @@ function sheet(mesh, parents, shape, turn, want, thigh, effort) {
     for (let i = 0; i < size; i++) {
       const s = Math.floor(i / cols) / (rows - 1);
       const w = (i % cols) / (cols - 1);
-      const over = easeIn(s, 0.3, 0.75);
+      const over = easeIn(s, ...(shape.cross ?? [0.3, 0.75]));
       parents.forEach(([parent, us, edges], n) => {
         const [u, angle] = mix(...edges.map((e) => spline(e, s * (e.length - 1))), w);
         const row = Math.max(0, Math.min(us.length - 2, us.findLastIndex((x) => x <= u)));
@@ -713,14 +730,29 @@ function sheet(mesh, parents, shape, turn, want, thigh, effort) {
         part.from.set([near + col, near + next, near + parent.cols + col, near + parent.cols + next], i * many + n * 4);
         part.share.set([(1 - p) * (1 - q), (1 - p) * q, p * (1 - q), p * q].map((x) => x * much), i * many + n * 4);
       });
-      part.lift[i] = (shape.to ? 0.5 : 0.22) + (shape.plump ?? 0.75) * Math.sqrt(Math.max(0, 1 - (2 * w - 1) ** 2)) * Math.sin(PI * s) ** 0.5;
-      // Fibres: every other line is darker. The ends pale into tendon.
-      const tendon = Math.max(0, 1 - Math.min(s, 1 - s) / 0.1);
-      v.set([...blend(blend(C[want], C[`${want}Dark`], i % cols % 2 ? 0 : 0.75), C.tendon, 0.45 * tendon), M.muscle, w * 8, 0, s * 20], (base + i) * STRIDE + 6);
+      v.set([0, 0, 0, M.muscle, w * 8, 0, s * 20], (base + i) * STRIDE + 6);
     }
   }
   const { from, share, lift, many } = part;
-  const hard = 1 + effort * (shape.swell ?? 1) * (want === 'works' ? 1 : 0.5);
+  // As it works the belly draws back toward where the muscle starts and thickens;
+  // the cord that follows it stays as it is.
+  const hard = effort * (want === 'works' ? 1 : 0.5);
+  const thick = (shape.plump ?? 0.75) * (1 + hard * (shape.swell ?? 1));
+  const [c0, c1] = shape.cord;
+  const end = 1 - c1 - hard * (shape.pull ?? 0.22);
+  const light = C[want];
+  const deep = C[`${want}Dark`];
+  for (let r = 0; r < rows; r++) {
+    const x = Math.min(1, Math.max(0, (r / (rows - 1) - c0) / (end - c0)));
+    const belly = Math.sin(PI * x ** 0.9);
+    const red = 0.25 + 0.75 * easeIn(x, 0, 0.2) * easeIn(1 - x, 0, shape.fade ?? 0.22);
+    for (let k = 0; k < cols; k++) {
+      lift[r * cols + k] = (shape.base ?? 0.1) + thick * belly * ACROSS[k];
+      const o = (base + r * cols + k) * STRIDE + 6;
+      const dark = k % 2 ? 0 : 0.6;
+      for (let a = 0; a < 3; a++) v[o + a] = C.tendon[a] + (light[a] + (deep[a] - light[a]) * dark - C.tendon[a]) * red;
+    }
+  }
   for (let i = 0; i < size; i++) {
     const o = (base + i) * STRIDE;
     let x = 0, y = 0, z = 0, nx = 0, ny = 0, nz = 0;
@@ -734,7 +766,7 @@ function sheet(mesh, parents, shape, turn, want, thigh, effort) {
       ny += k * v[f + 4];
       nz += k * v[f + 5];
     }
-    const stand = lift[i] * hard;
+    const stand = lift[i];
     const l = stand / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1);
     x += nx * l;
     y += ny * l;
@@ -796,7 +828,7 @@ function muscles(mesh, clip, j, on) {
         // The torso carries both sides, a limb its own.
         const parents = [[shape.on, shape.edges], ...(shape.to ? [[shape.to, shape.far]] : [])].map(([name, edges]) => [on[name][side] ?? on[name][0], US[name],
           name === 'torso' && side ? edges.map((e) => e.map(([u, a]) => [u, -a])) : edges]);
-        sheet(mesh, parents, shape, turn, want, shape.to && [j.hip, j.knee].map((q) => (side ? flip(q) : q)), j.life.effort);
+        sheet(mesh, parents, shape, turn, shape.aid ? 'helps' : want, shape.keep && [j.hip, j.knee].map((q) => (side ? flip(q) : q)), j.life.effort);
       }
     }
   }
