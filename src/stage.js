@@ -1,19 +1,21 @@
 // Draws a mesh from body.js with WebGL 2: one key light with soft shadows, a
-// floor that catches them, and a rim so limbs stand apart. Nothing is loaded.
+// floor that catches them and darkens under what stands on it, a rim so limbs
+// stand apart, and a material for each kind of surface. Nothing is loaded.
 import { STRIDE } from './body.js';
 
 const VERT = `#version 300 es
-layout(location=0) in vec3 p; layout(location=1) in vec3 n; layout(location=2) in vec4 c;
-uniform mat4 view, light; uniform float depthOnly;
-out vec3 P, N; out vec4 K; out vec4 S;
+layout(location=0) in vec3 p; layout(location=1) in vec3 n; layout(location=2) in vec4 c; layout(location=3) in vec3 r;
+uniform mat4 view, light; uniform float depthOnly; 
+out vec3 P, N, R, K; out vec4 S; flat out int m;
 void main() {
-  P = p; N = n; K = c; S = light * vec4(p + n * .6, 1.);
-  gl_Position = depthOnly > .5 ? light * vec4(p, 1.) : view * vec4(p, 1.);
+  P = p; N = n; K = c.rgb; m = int(c.a + .5); R = r; S = light * vec4(p + n * .6, 1.);
+  if (depthOnly > 1.5) gl_Position = vec4((p.xz - vec2(108., 0.)) * vec2(1., -1.) / 85., p.y / 20. - 1., 1.);
+  else gl_Position = depthOnly > .5 ? light * vec4(p, 1.) : view * vec4(p, 1.);
 }`;
 const FRAG = `#version 300 es
 precision highp float; precision highp sampler2DShadow;
-in vec3 P, N; in vec4 K; in vec4 S;
-uniform vec3 eye, key; uniform sampler2DShadow map; uniform float mode, dark, reach; uniform vec2 middle, size;
+in vec3 P, N, R, K; in vec4 S; flat in int m;
+uniform vec3 eye, key; uniform sampler2DShadow map, under; uniform float mode, dark, reach; uniform vec2 size, middle;
 out vec4 o;
 float lit() {
   vec3 q = S.xyz / S.w * .5 + .5; q.z -= .0015;
@@ -21,26 +23,77 @@ float lit() {
   for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) s += texture(map, vec3(q.xy + vec2(x, y) * .0011, q.z));
   return s / 9.;
 }
+float hash(vec3 q) { q = fract(q * .3183 + .1); q *= 17.; return fract(q.x * q.y * q.z * (q.x + q.y + q.z)); }
+float noise(vec3 q) {
+  vec3 i = floor(q), f = fract(q); f = f * f * (3. - 2. * f);
+  vec2 e = vec2(0., 1.);
+  return mix(mix(mix(hash(i), hash(i + e.yxx), f.x), mix(hash(i + e.xyx), hash(i + e.yyx), f.x), f.y),
+    mix(mix(hash(i + e.xxy), hash(i + e.yxy), f.x), mix(hash(i + e.xyy), hash(i + e.yyy), f.x), f.y), f.z) - .5;
+}
+// The same, gone where it is finer than the pixels.
+float grain(vec3 q) { vec3 w = fwidth(q); return noise(q) * smoothstep(1.2, .55, max(w.x, max(w.y, w.z))); }
+// The normal of a surface raised by h. Never steep, so thin edges do not sparkle.
+vec3 raised(vec3 n, float h) {
+  vec3 x = dFdx(P), y = dFdy(P), a = cross(y, n), b = cross(n, x);
+  float det = dot(x, a);
+  vec3 up = (dFdx(h) * a + dFdy(h) * b) * sign(det) / max(abs(det), 1e-5);
+  return normalize(n - up * min(1., .5 / max(length(up), 1e-5)));
+}
 void main() {
-  if (mode > 1.5) { o = vec4(K.rgb, 1.); return; }
-  float s = lit();
+  if (mode > 1.5) { o = vec4(K, 1.); return; }
   if (mode > .5) {
     float away = length(P.xz - middle) / reach;
     vec2 rim = gl_FragCoord.xy / size;
-    float fade = smoothstep(1., .5, away) * smoothstep(0., .16, rim.y) * smoothstep(0., .1, rim.x) * smoothstep(1., .9, rim.x);
-    if (dark > .5) { vec3 f = vec3(.085, .092, .108) * (.45 + .55 * s); o = vec4(f * fade, fade); }
-    else { float a = (1. - s) * .2 * fade; o = vec4(vec3(.05, .07, .12) * a, a); }
+    float edge = smoothstep(0., .04, rim.y) * smoothstep(0., .04, rim.x) * smoothstep(1., .96, rim.x);
+    float fade = smoothstep(1., .4, away) * smoothstep(0., .14, rim.y) * smoothstep(0., .2, rim.x) * smoothstep(1., .8, rim.x);
+    if (edge <= 0. || away > 1.4) discard;
+    float s = lit();
+    // Darker where something stands on the floor or hangs just above it.
+    float near = 0.;
+    for (int i = 0; i < 32; i++) {
+      float turn = float(i) * 2.4, far = sqrt((float(i) + .5) / 32.) * 8.;
+      vec2 q = (P.xz + far * vec2(cos(turn), sin(turn)) - vec2(108., 0.)) * vec2(.5, -.5) / 85. + .5;
+      near += (1. - texture(under, vec3(q, (9. - far) / 40.))) / 32.;
+    }
+    near = smoothstep(0., .5, near) * edge;
+    if (dark > .5) { vec3 f = vec3(.085, .092, .108) * (.45 + .55 * s) * (1. - .8 * near); o = vec4(f * fade, fade); }
+    else { float a = 1. - (1. - (1. - s) * .2 * smoothstep(1., .5, away) * edge) * (1. - .5 * near); o = vec4(vec3(.05, .07, .12) * a, a); }
     return;
   }
-  vec3 n = normalize(N), v = normalize(eye - P);
-  vec3 base = pow(K.rgb, vec3(2.2));
-  float d = max(dot(n, key), 0.);
+  float s = lit();
+  vec3 n = normalize(N), v = normalize(eye - P), base = pow(K, vec3(2.2));
+  // How far light wraps past the edge, how bright and tight the highlight is,
+  // how much of the room shows in it, how much cloth fuzz catches the light, and
+  // the grain: its scale, and how much it raises and shades the surface.
+  vec3 wrap = vec3(0.), q = R; float shine = .05, tight = 20., mirror = 0., fuzz = 0., high = 0., tone = 0.;
+  if (m == 1) { wrap = vec3(.26, .12, .08); shine = .16; tight = 14.; q = R * .9; tone = .1; } // skin
+  if (m == 2) { wrap = vec3(.12); shine = 0.; fuzz = .9; q = R * vec3(.16, .16, .3); high = .7; } // cloth
+  if (m == 3) { shine = .22; tight = 10.; q = R * vec3(.7, 1.4, 2.6); high = .1; tone = .5; } // hair
+  if (m == 4) { mirror = .7; shine = .6; tight = 60.; } // steel
+  if (m == 5) { shine = .13; tight = 24.; mirror = .06; q = R * 1.4; high = .02; tone = .05; } // iron
+  if (m == 6) { shine = .2; tight = 9.; mirror = .07; q = R * 1.5; high = .05; } // vinyl
+  if (m == 7) { wrap = vec3(.1); fuzz = .15; } // rubber
+  if (m == 8) { wrap = vec3(.2, .05, .04); shine = .4; tight = 34.; q = vec3(R.x * 1.9, 0., R.z * .35); high = .18; tone = .3; } // muscle
+  float g = grain(q);
+  n = raised(n, high * g);
+  base *= 1. + tone * g;
+  float nl = dot(n, key), facing = clamp(dot(n, v), 0., 1.), sky = .5 + .5 * n.y;
+  vec3 d = max((vec3(nl) + wrap) / (1. + wrap), 0.) * mix(.12, 1., s);
   float side = .5 + .5 * dot(n, normalize(vec3(-key.x, .15, -key.z)));
-  float sky = .5 + .5 * n.y;
-  vec3 c = base * (vec3(.30, .32, .37) * mix(.55, 1.1, sky) + vec3(.16, .17, .2) * side + vec3(1.02, .98, .93) * d * mix(.12, 1., s));
-  float rim = pow(1. - max(dot(n, v), 0.), 3.);
+  vec3 c = base * (vec3(.30, .32, .37) * mix(.55, 1.1, sky) + vec3(.16, .17, .2) * side + vec3(1.02, .98, .93) * d);
+  // The room: a bright ceiling panel, pale walls, a dark line at the floor.
+  vec3 r = reflect(-v, n);
+  float room = .4 + .5 * smoothstep(-.2, .9, r.y) + .7 * smoothstep(.72, .95, dot(r, key)) - .22 * smoothstep(.25, 0., abs(r.y + .12));
+  float edge = pow(1. - facing, 5.);
+  c = mix(c, base * room * 1.25, mirror * (1. - edge)) + mirror * edge * room * .25;
+  float rim = pow(1. - facing, 3.);
   c += rim * (dark > .5 ? vec3(.22, .25, .32) : vec3(.10, .11, .13)) * (.4 + .6 * sky);
-  c += K.a * pow(max(dot(n, normalize(key + v)), 0.), 26.) * s * .55;
+  c += fuzz * base * pow(1. - facing, 2.) * (.3 + .7 * sky);
+  c += shine * pow(max(dot(n, normalize(key + v)), 0.), tight) * s * .55;
+  // The brightest parts level off below white, so nothing is lost on a white page.
+  // One scale for all three, so colours keep their hue.
+  float most = max(c.r, max(c.g, c.b));
+  c *= (min(most, .5) + .3 * (1. - exp(-max(most - .5, 0.) / .3))) / max(most, 1e-4);
   o = vec4(pow(c, vec3(1. / 2.2)), 1.);
 }`;
 
@@ -102,17 +155,28 @@ export function createStage(canvas) {
   }
   gl.linkProgram(program);
   gl.useProgram(program);
-  const at = Object.fromEntries(['view', 'light', 'depthOnly', 'eye', 'key', 'map', 'mode', 'dark', 'reach', 'middle', 'size'].map((n) => [n, gl.getUniformLocation(program, n)]));
+  const at = Object.fromEntries(['view', 'light', 'depthOnly', 'eye', 'key', 'map', 'mode', 'dark', 'reach', 'middle', 'size', 'under'].map((n) => [n, gl.getUniformLocation(program, n)]));
 
-  const SHADOW = 1024;
-  const map = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, map);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, SHADOW, SHADOW, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
-  for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE], [gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
-  const target = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, target);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, map, 0);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  // Depth maps: from the light, and from under the floor looking up.
+  const depthMap = (size) => {
+    const map = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, map);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, size, size, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE], [gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    const target = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, map, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { map, fill: (depthOnly, n) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+      gl.viewport(0, 0, size, size);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      gl.uniform1f(at.depthOnly, depthOnly);
+      gl.drawElements(gl.TRIANGLES, n, gl.UNSIGNED_SHORT, 0);
+    } };
+  };
+  const shadow = depthMap(1024);
+  const under = depthMap(72);
 
   const buffer = () => {
     const vao = gl.createVertexArray();
@@ -121,7 +185,7 @@ export function createStage(canvas) {
     const ibo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-    for (const [i, size, offset] of [[0, 3, 0], [1, 3, 3], [2, 4, 6]]) {
+    for (const [i, size, offset] of [[0, 3, 0], [1, 3, 3], [2, 4, 6], [3, 3, 10]]) {
       gl.enableVertexAttribArray(i);
       gl.vertexAttribPointer(i, size, gl.FLOAT, false, STRIDE * 4, offset * 4);
     }
@@ -144,7 +208,7 @@ export function createStage(canvas) {
   const floor = buffer();
   const F = 500;
   floor.load({
-    v: new Float32Array([[-F, -F], [F, -F], [F, F], [-F, F]].flatMap(([x, z]) => [x, 0, z, 0, 1, 0, 1, 1, 1, 0])),
+    v: new Float32Array([[-F, -F], [F, -F], [F, F], [-F, F]].flatMap(([x, z]) => [x, 0, z, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0])),
     i: new Uint16Array([0, 1, 2, 0, 2, 3]), n: 4, m: 6,
   });
 
@@ -173,16 +237,15 @@ export function createStage(canvas) {
       gl.disable(gl.BLEND);
       body.load(mesh);
 
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, target);
-      gl.viewport(0, 0, SHADOW, SHADOW);
-      gl.clear(gl.DEPTH_BUFFER_BIT);
-      gl.uniform1f(at.depthOnly, 1);
+      const units = (a, b) => [a, b].forEach((m, i) => { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, m); });
+      units(null, null);
+      gl.uniform1i(at.under, 1);
       gl.uniform1f(at.mode, 2);
-      gl.drawElements(gl.TRIANGLES, mesh.m, gl.UNSIGNED_SHORT, 0);
+      shadow.fill(1, mesh.m);
+      under.fill(2, mesh.m);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.bindTexture(gl.TEXTURE_2D, map);
+      units(shadow.map, under.map);
       gl.viewport(0, 0, w, h);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);

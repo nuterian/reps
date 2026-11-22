@@ -481,6 +481,16 @@ async function main() {
       await p.goto(`${base}#/exercise/${id}`);
       await see(p.locator('.bar h1'), EXERCISES.find((x) => x.id === id).name, 'page after page');
       await p.waitForTimeout(60);
+      if (id === 'leg-press') continue; // its lowest point is a thin post, which shades little
+      // The floor is darker just below the lowest point of what stands on it.
+      const shade = await p.evaluate(() => {
+        const c = document.querySelector('.clip canvas');
+        const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+        let low = data.length - 4;
+        while (low > 0 && data[low + 3] < 255) low -= 4;
+        return data[low + 4 * (4 * c.width - 12) + 3] / 255;
+      });
+      assert.ok(shade > 0.03 && shade < 0.7, `${id}: the floor under the figure is shaded ${shade.toFixed(2)}`);
     }
     await p.waitForTimeout(300);
     const full = await p.locator('.clip canvas').screenshot();
@@ -498,6 +508,40 @@ async function main() {
       await p.waitForTimeout(90);
     }
     assert.deepEqual([...heard].sort(), ['Hold/', 'Lower/Slowly, breathe in', 'Push/Breathe out'], 'the words follow the rep');
+    // Materials: the picture changes without them, and without their grain; and the
+    // grain belongs to the figure, so moving figure and camera together changes nothing.
+    const differ = await p.evaluate(async () => {
+      const at = (file) => import(new URL(`src/${file}.js`, document.baseURI));
+      const [F, B, S, { FORM: forms }] = await Promise.all(['figure', 'body', 'stage', 'form'].map(at));
+      const canvas = Object.assign(document.createElement('canvas'), { width: 600, height: 460 });
+      const stage = S.createStage(canvas);
+      const draw = (change, shift = 0, clip = forms.rdl, turn = 0) => {
+        const mesh = B.build(B.createMesh(), clip, F.solve(clip.pose(0)), 0);
+        const cloud = Array.from({ length: mesh.n }, (_, i) => mesh.v.slice(i * B.STRIDE, i * B.STRIDE + 3));
+        for (let i = 0; i < mesh.n; i++) {
+          change(mesh.v.subarray(i * B.STRIDE, (i + 1) * B.STRIDE));
+          mesh.v[i * B.STRIDE] += shift;
+        }
+        const camera = S.frameCamera(cloud.map(([x, y, z]) => [x + shift, y, z]), clip.yaw + turn, 10, 600 / 460);
+        stage.draw(mesh, B.dots(B.createMesh(), []), camera, { dark: false, reach: 90 });
+        const flat = Object.assign(document.createElement('canvas'), { width: 600, height: 460 }).getContext('2d');
+        flat.drawImage(canvas, 0, 0);
+        return flat.getImageData(0, 0, 600, 460).data;
+      };
+      const whole = draw(() => {});
+      const apart = (other) => {
+        let sum = 0;
+        let n = 0;
+        for (let i = 0; i < whole.length; i += 4) {
+          if (whole[i + 3] < 255 || other[i + 3] < 255) continue;
+          sum += Math.abs(whole[i] - other[i]) + Math.abs(whole[i + 1] - other[i + 1]) + Math.abs(whole[i + 2] - other[i + 2]);
+          n++;
+        }
+        return sum / n;
+      };
+      return { plain: apart(draw((v) => { v[9] = 0; })), grain: apart(draw((v) => v.fill(0, 10))), moved: apart(draw(() => {}, 7.3)), white: draw(() => {}, 0, forms['leg-press'], -90).reduce((n, x, i, d) => n + (i % 4 === 3 && x === 255 && Math.min(d[i - 1], d[i - 2], d[i - 3]) > 240 ? 1 : 0), 0) };
+    });
+    assert.ok(differ.plain > 8 && differ.grain > 1.5 && differ.moved < 0.8 && differ.white === 0, `materials: ${JSON.stringify(differ)}`);
     // In a hold the figure still breathes: the picture changes between two moments of it.
     const [early, late, word] = await p.evaluate(() => new Promise((done) => {
       const canvas = document.querySelector('.clip canvas');

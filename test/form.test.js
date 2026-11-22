@@ -627,3 +627,62 @@ test('the figure lives: it breathes as the words say, works its muscles, blinks,
   const blinks = shut.filter((x, i) => x && !shut[i - 1]).length;
   assert.ok(blinks >= 4 && blinks <= 8, `${blinks} blinks in 20 seconds`);
 });
+
+test('every surface has its own material, and its grain moves with it', () => {
+  // What stage.js calls them, by the parts they are on: points to a ring, or kind of equipment.
+  const [PLAIN, SKIN, CLOTH, HAIR, STEEL, IRON, VINYL, RUBBER, MUSCLE] = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+  const of = (m, p) => new Set(Array.from({ length: p.rows * p.cols }, (_, i) => m.v[(p.base + i) * STRIDE + 9]));
+  const has = (m, pick, want, what) => {
+    const parts = m.parts.filter(pick);
+    assert.ok(parts.length, `${what} is there`);
+    for (const p of parts) assert.deepEqual([...of(m, p)].sort(), want, what);
+  };
+  const body = (p) => !p.want;
+  for (const [id, at] of Object.entries(meshes)) {
+    const m = at(0);
+    has(m, (p) => body(p) && p.cols === 36, [SKIN, CLOTH], `${id}: shirt, shorts and neck`);
+    has(m, (p) => body(p) && p.cols === 22 && p.rows > 30, [SKIN, CLOTH], `${id}: sleeve and arm`);
+    has(m, (p) => body(p) && p.cols === 24, [SKIN, CLOTH], `${id}: shorts, leg and sock`);
+    has(m, (p) => body(p) && p.cols === 40 && p.rows > 40, [SKIN], `${id}: face`);
+    has(m, (p) => body(p) && p.cols === 38, [HAIR], `${id}: hair`);
+    has(m, (p) => p.want, [MUSCLE], `${id}: muscles`);
+    const gear = new Set(m.parts.slice(m.parts.findLastIndex((p) => p.want) + 1).flatMap((p) => [...of(m, p)]));
+    const made = { steel: STEEL, load: IRON, pad: VINYL, cable: RUBBER, rope: CLOTH };
+    assert.deepEqual([...gear].sort(), [...new Set(FORM[id].gear(solve(FORM[id].pose(0)), 0).map((g) => made[g.kind]))].sort(), `${id}: equipment`);
+    // The grain is fixed to the part for good, and is not the same all over it.
+    const grain = (v) => v.filter((_, i) => i % STRIDE > 9);
+    const start = grain(m.v.slice(0, m.n * STRIDE));
+    assert.deepEqual(grain(at(1).v.slice(0, m.n * STRIDE)), start, `${id}: the grain stays on the skin`);
+    for (const p of m.parts) {
+      const cells = new Set(Array.from({ length: p.rows * p.cols }, (_, i) => [0, 1, 2].map((a) => Math.round(start[(p.base + i) * 3 + a])).join()));
+      assert.ok(cells.size > 3, `${id}: a part has no grain`);
+    }
+  }
+  // Cloth ends in a clean edge: the rings either side of a hem are at the same place.
+  for (const p of meshes.rdl(0).parts.filter((q) => !q.want && [36, 22, 24].includes(q.cols) && q.rows > 30)) {
+    const { v } = meshes.rdl(0);
+    let hems = 0;
+    for (let r = 1; r < p.rows; r++) {
+      const [a, b] = [(p.base + (r - 1) * p.cols) * STRIDE, (p.base + r * p.cols) * STRIDE];
+      if (dist(v.subarray(a + 6, a + 9), v.subarray(b + 6, b + 9)) < 0.05) continue;
+      hems++;
+      assert.ok(dist(v.subarray(a, a + 3), v.subarray(b, b + 3)) < 1, `a hem is blurred over ${dist(v.subarray(a, a + 3), v.subarray(b, b + 3)).toFixed(1)}`);
+    }
+    assert.ok(hems >= 1, 'there is a hem');
+  }
+  const shader = readFileSync(new URL('../src/stage.js', import.meta.url), 'utf8');
+  for (const m of [SKIN, CLOTH, HAIR, STEEL, IRON, VINYL, RUBBER, MUSCLE]) assert.match(shader, new RegExp(`m == ${m}\\b`), `material ${m} is shaded`);
+  assert.equal(PLAIN, 0);
+  // The faces of a plate look out, so light falls on them.
+  const m = meshes.rdl(0);
+  const plates = m.parts.filter((p) => p.cols === 40 && p.rows < 40);
+  assert.equal(plates.length, 2);
+  for (const { base, rows, cols } of plates) {
+    const z = (i) => m.v[(base + i) * STRIDE + 2];
+    const mid = (z(0) + z(rows * cols - 1)) / 2;
+    for (let i = cols; i < (rows - 1) * cols; i++) {
+      const n = m.v[(base + i) * STRIDE + 5];
+      if (Math.abs(n) > 0.9) assert.ok(n * (z(i) - mid) > 0, `ring ${Math.floor(i / cols)} of a plate faces inward`);
+    }
+  }
+});

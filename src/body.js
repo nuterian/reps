@@ -4,7 +4,7 @@
 // point is and what colour it has; normals come from the neighbours.
 import { add, sub, dot, cross, len, mix, unit, square, flip, dir, solve } from './figure.js';
 
-export const STRIDE = 10; // position 3, normal 3, colour 3, gloss 1
+export const STRIDE = 13; // position 3, normal 3, colour 3, material 1, place on the part at rest 3
 export const CAP = 20000; // most points a mesh can hold
 
 // A mesh belongs to one clip: what never changes during a rep (the outline of
@@ -52,8 +52,9 @@ function tipNormal(v, ring, cols, [tx, ty, tz], [mx, my, mz]) {
 // One part: rings of `cols` points, one for each u.
 // ring(u, r): [centre, axis 1, axis 2, axis 3] of a ring, worked out every time.
 // shape(u, angle, r): offsets along those axes, worked out once.
-// paint(u, angle, r): [colour, gloss], worked out once.
-function sweep(mesh, us, cols, ring, shape, paint) {
+// paint(u, angle, r): [colour, material], worked out once.
+// wound: its normals already point out; else each is turned from the middle of its ring.
+function sweep(mesh, us, cols, ring, shape, paint, wound) {
   const { v } = mesh;
   const rows = us.length;
   const base = mesh.n;
@@ -61,12 +62,19 @@ function sweep(mesh, us, cols, ring, shape, paint) {
   if (!part) {
     part = { base, rows, cols, off: new Float32Array(rows * cols * 3) };
     mesh.parts.push(part);
+    let along = 0;
+    let before;
     us.forEach((u, r) => {
+      const [at] = ring(u, r);
+      if (before) along += len(sub(at, before));
+      before = at;
       for (let k = 0; k < cols; k++) {
         const angle = (k / cols) * TAU;
-        part.off.set(shape(u, angle, r), (r * cols + k) * 3);
-        const [color, gloss] = paint(u, angle, r);
-        v.set([...color, gloss], (base + r * cols + k) * STRIDE + 6);
+        const [x, y, z] = shape(u, angle, r);
+        part.off.set([x, y, z], (r * cols + k) * 3);
+        const [color, made] = paint(u, angle, r);
+        // Where the grain of the material lies: on the part, so it moves with it.
+        v.set([...color, made, x, y, z + along], (base + r * cols + k) * STRIDE + 6);
       }
     });
   }
@@ -109,7 +117,7 @@ function sweep(mesh, us, cols, ring, shape, paint) {
         ny = tip[1];
         nz = tip[2];
         l = 1;
-      } else if (nx * (v[o] - mx) + ny * (v[o + 1] - my) + nz * (v[o + 2] - mz) < 0) l = -l;
+      } else if (!wound && nx * (v[o] - mx) + ny * (v[o + 1] - my) + nz * (v[o + 2] - mz) < 0) l = -l;
       v[o + 3] = nx / l;
       v[o + 4] = ny / l;
       v[o + 5] = nz / l;
@@ -119,7 +127,7 @@ function sweep(mesh, us, cols, ring, shape, paint) {
   return part;
 }
 
-const steps = (from, to, n) => Array.from({ length: n }, (_, i) => from + ((to - from) * i) / (n - 1));
+const steps = (from, to, n) => Array.from({ length: n }, (_, i) => (i < n - 1 ? from + ((to - from) * i) / (n - 1) : to));
 // Steps from a to b with a doubled ring at each hem, so cloth ends in a clean edge.
 function hemmed(from, to, n, hems) {
   const cuts = [from, ...hems, to];
@@ -156,8 +164,11 @@ const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
 const C = {
   skin: hex('#cf9f7f'), hair: hex('#2b2320'), lips: hex('#bd8170'), white: hex('#f0ebe6'), iris: hex('#3a281e'), top: hex('#525b6d'), shorts: hex('#262a33'), shoe: hex('#3a404b'), sole: hex('#f3f4f6'), sock: hex('#eceef2'),
   works: hex('#b23a34'), worksDark: hex('#8a2422'), helps: hex('#e79a90'), helpsDark: hex('#cf7a72'), tendon: hex('#efd9cb'),
-  steel: hex('#b4bac5'), pad: hex('#697180'), load: hex('#ffdc55'), hub: hex('#9aa0ab'), cable: hex('#3a3f48'), rope: hex('#e8dcc0'), dot: hex('#8a909c'),
+  steel: hex('#b4bac5'), pad: hex('#697180'), load: hex('#ffdf70'), hub: hex('#9aa0ab'), cable: hex('#3a3f48'), rope: hex('#e8dcc0'), dot: hex('#8a909c'),
 };
+
+// What a surface is made of. stage.js shades each in its own way.
+const M = { plain: 0, skin: 1, cloth: 2, hair: 3, steel: 4, iron: 5, vinyl: 6, rubber: 7, muscle: 8 };
 
 const easeIn = (x, lo, hi) => { const k = Math.min(1, Math.max(0, (x - lo) / (hi - lo))); return k * k * (3 - 2 * k); };
 
@@ -228,7 +239,7 @@ function arms(mesh, j) {
   // Rings before the hem are cloth; the doubled ring after it is skin.
   const cloth = (r) => r <= ARM_U.indexOf(SLEEVE);
   const radius = (u, a, r) => armR(u)[0] + 0.45 * ARM.shoulders(u, a) + 0.9 * ARM.biceps(u, a) + 0.7 * ARM.triceps(u, a) + 0.35 * ARM.forearms(u) + (cloth(r) ? 0.5 : 0);
-  const paint = (u, a, r) => [cloth(r) ? C.top : C.skin, cloth(r) ? 0.03 : 0.12];
+  const paint = (u, a, r) => [cloth(r) ? C.top : C.skin, cloth(r) ? M.cloth : M.skin];
   const along = unit(sub(j.hand, j.elbow));
   const root = add(mix(j.spine[3], j.spine[2], 0.5), [0, 0, 5]);
   return [(p) => p, flip].map((m) => {
@@ -247,7 +258,7 @@ function fist(mesh, at, along, grip) {
     const knuckle = 1 - 0.09 * Math.abs(Math.sin(k * 4 * Math.PI)) ** 8;
     const full = (Math.abs(Math.cos(a)) ** 3 + Math.abs(Math.sin(a)) ** 3) ** (-1 / 3);
     return [Math.cos(a) * 2.8 * end * knuckle * full, Math.sin(a) * 2.4 * end * knuckle * full, 0];
-  }, () => [C.skin, 0.12]);
+  }, () => [C.skin, M.skin]);
 }
 
 const LEG = {
@@ -265,7 +276,7 @@ function legs(mesh, j) {
   const sock = (r) => r > LEG_U.indexOf(SOCK);
   const radius = (u, a, r) => legR(u)[0] + 0.9 * LEG.quads(u, a) + 0.8 * LEG.hamstrings(u, a) + 2 * LEG.glutes(u, a) + 1.3 * LEG.calves(u, a)
     + 0.5 * bump(u - 1, 0.07) * toward(a, 0, 2) + (cloth(r) ? 0.4 + 0.35 * Math.max(0, u) : sock(r) ? 0.25 : 0);
-  const paint = (u, a, r) => [sock(r) ? C.sock : cloth(r) ? C.shorts : C.skin, cloth(r) ? 0.03 : 0.12];
+  const paint = (u, a, r) => [sock(r) ? C.sock : cloth(r) ? C.shorts : C.skin, sock(r) || cloth(r) ? M.cloth : M.skin];
   // Deep in the hips, half way between up the spine and back along the thigh,
   // so the thigh grows out of them wherever it points and never folds sharply.
   const root = add([j.hip[0], j.hip[1], 3.5], unit(add(dir(j.angles[0]), unit(sub(j.knee, j.hip)), -0.7)), 9);
@@ -294,7 +305,7 @@ function shoe(mesh, ankle, toe, sole) {
       const c = Math.cos(a);
       const y = from + ((top - from) * (1 + Math.sign(c) * Math.abs(c) ** (isSole ? 0.3 : 0.7))) / 2;
       return [tip < 1 ? (from + top) / 2 : y, Math.sign(Math.sin(a)) * Math.abs(Math.sin(a)) ** (isSole ? 0.5 : 0.8) * (w + grow) * tip, 0];
-    }, () => [color, isSole ? 0.05 : 0.15]);
+    }, () => [color, isSole ? M.rubber : M.cloth]);
   }
 }
 
@@ -345,7 +356,7 @@ function torso(mesh, j) {
     const swell = 1.2 * TORSO.chest(u, a) + 0.5 * TORSO.lats(u, a) + 1.2 * TORSO.glutes(u, a) + 0.3 * TORSO['upper back'](u, a)
       - 0.5 * bump(u - 1.6, 0.9) * toward(a, Math.PI, 20) + (shirt(r) ? 0.35 : shorts(r) ? 0.55 : 0);
     return [ca * ((ca > 0 ? f : b) * full + swell), sa * (w * full + swell * 0.5), 0];
-  }, (u, a, r) => [shorts(r) ? C.shorts : shirt(r) ? C.top : C.skin, shorts(r) || shirt(r) ? 0.03 : 0.12]);
+  }, (u, a, r) => [shorts(r) ? C.shorts : shirt(r) ? C.top : C.skin, shorts(r) || shirt(r) ? M.cloth : M.skin]);
 }
 
 // The head is fixed to the skeleton: x is forward, y is up from its middle and
@@ -448,7 +459,7 @@ function head(mesh, j) {
   part(FACE_U, 40, (u, a) => skull(u, faceward(a)), (u, a) => {
     const [x, y, z] = skull(u, faceward(a));
     const lips = x > 0 ? easeIn(bump(y + 5, 0.75) * bump(z, 1.75), 0.4, 0.85) : 0;
-    return [blend(C.skin, C.lips, lips), 0.12];
+    return [blend(C.skin, C.lips, lips), M.skin];
   });
 
   for (const s of [1, -1]) {
@@ -462,20 +473,20 @@ function head(mesh, j) {
       return onSide([x + deep * thick * Math.sin(a), y + tall * thick * Math.cos(a), z]);
     }, () => paint);
     // The white darkens under the lids, so the eye sits in the face.
-    lay(eyes.white, (u) => [blend(C.white, C.skin, 0.55 * easeIn(u, 1, 3)), 0.1]);
-    lay(eyes.iris, () => [C.iris, 0.06]);
-    line(eye, eyes.lash, 0.1, 0.1, (k) => Math.sqrt(Math.sin(Math.PI * k)), [C.hair, 0]);
-    line(part, eyes.brow, 0.27, 0.11, (k) => Math.sqrt(Math.min(1, (1 - k) / 0.7, 0.4 + k / 0.3)), [blend(C.hair, C.skin, 0.2), 0]);
+    lay(eyes.white, (u) => [blend(C.white, C.skin, 0.55 * easeIn(u, 1, 3)), M.plain]);
+    lay(eyes.iris, () => [C.iris, M.plain]);
+    line(eye, eyes.lash, 0.1, 0.1, (k) => Math.sqrt(Math.sin(Math.PI * k)), [C.hair, M.plain]);
+    line(part, eyes.brow, 0.27, 0.11, (k) => Math.sqrt(Math.min(1, (1 - k) / 0.7, 0.4 + k / 0.3)), [blend(C.hair, C.skin, 0.2), M.plain]);
 
     // Ear: a thin shell inside a rim that curls round to the lobe.
     const shell = (a, r, lift) => [-1 + r * (Math.cos(a) * 1.25 - Math.sin(a) * 0.4), -0.4 + r * Math.sin(a) * 2.05, 5.1 + r * (0.55 - 0.65 * Math.cos(a)) + lift];
-    part([0, 1, 2, 3, 4], 14, (u, a) => onSide(shell(a, [0.02, 0.5, 0.95, 0.9, 0.02][u], [0.75, 0.3, -0.2, -0.6, -0.8][u])), () => [blend(C.skin, C.hair, 0.15), 0.05]);
+    part([0, 1, 2, 3, 4], 14, (u, a) => onSide(shell(a, [0.02, 0.5, 0.95, 0.9, 0.02][u], [0.75, 0.3, -0.2, -0.6, -0.8][u])), () => [blend(C.skin, C.hair, 0.15), M.skin]);
     part(steps(0, 1, 16), 8, (k, a, r) => {
       const round = -0.5 + 5.2 * k;
       const [x, y] = unit(sub(shell(round, 1, 0), shell(round, 0.5, 0)));
       const thick = r % 15 ? 0.3 + 0.18 * Math.sin(k * 3) + 0.3 * bump(k - 0.93, 0.1) : 0.02;
       return onSide(add(shell(round, 0.95, 0.2), [x * Math.cos(a), y * Math.cos(a), Math.sin(a)], thick));
-    }, () => [C.skin, 0.1]);
+    }, () => [C.skin, M.skin]);
   }
 
   // Hair: a short cut, cropped close at the sides.
@@ -486,7 +497,7 @@ function head(mesh, j) {
     const u = low + (CROWN - low) * k;
     const thick = r ? (0.15 + easeIn(k, -0.05, 0.4) * (0.15 + 0.8 * easeIn(u, 7, 10.8))) * (1 - easeIn(u, 12.2, CROWN)) : -0.4;
     return add(skull(u, a, thick), [0, 0.75 * easeIn(u, 9.6, 13), 0]);
-  }, (k, a) => [blend(C.hair, C.skin, 0.4 * (1 - easeIn(k, 0, 0.35)) * easeIn(turned(a), 0.9, 1.4)), 0.12]);
+  }, (k, a) => [blend(C.hair, C.skin, 0.4 * (1 - easeIn(k, 0, 0.35)) * easeIn(turned(a), 0.9, 1.4)), M.hair]);
 }
 
 // --- muscles -------------------------------------------------------------------
@@ -571,7 +582,7 @@ function sheet(mesh, parents, shape, turn, want, thigh, effort) {
       part.lift[i] = 0.22 + (shape.plump ?? 0.75) * Math.sqrt(Math.max(0, 1 - (2 * w - 1) ** 2)) * Math.sin(PI * s) ** 0.5;
       // Fibres: every other line is darker. The ends pale into tendon.
       const tendon = Math.max(0, 1 - Math.min(s, 1 - s) / 0.1);
-      v.set([...blend(blend(C[want], C[`${want}Dark`], i % cols % 2 ? 0 : 0.75), C.tendon, 0.45 * tendon), 0.18], (base + i) * STRIDE + 6);
+      v.set([...blend(blend(C[want], C[`${want}Dark`], i % cols % 2 ? 0 : 0.75), C.tendon, 0.45 * tendon), M.muscle, w * 8, 0, s * 20], (base + i) * STRIDE + 6);
     }
   }
   const { from, share, lift, many } = part;
@@ -670,17 +681,17 @@ export const dumbbells = (hand, grip = [0, 0, 1], size = 1) => [[hand, grip], [f
   { shape: 'head', kind: 'load', a: add(c, g, -4.6), b: add(c, g, -10.2 * size), r: 5 * size },
 ]);
 
-const GLOSS = { steel: 0.5, load: 0.25, pad: 0.06, cable: 0.1, rope: 0.02 };
+const MADE = { steel: M.steel, load: M.iron, pad: M.vinyl, cable: M.rubber, rope: M.cloth };
 
 // A solid of revolution along a to b. rings: [share of the way, radius].
-function lathe(mesh, a, b, rings, cols, color, gloss) {
+function lathe(mesh, a, b, rings, cols, color, made) {
   const t = unit(sub(b, a));
   const x = unit(cross(t, Math.abs(t[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]));
   const y = cross(t, x);
   const l = len(sub(b, a));
   sweep(mesh, rings.map((r) => r[0]), cols, (s) => [add(a, t, s * l), x, y],
     (s, ang, r) => [Math.cos(ang) * rings[r][1], Math.sin(ang) * rings[r][1], 0],
-    (s, ang, r) => [typeof color === 'function' ? color(rings[r][1]) : color, gloss]);
+    (s, ang, r) => [typeof color === 'function' ? color(rings[r][1]) : color, made], true);
 }
 
 // How far along, and how thick, a cushion is from one end to the other.
@@ -688,14 +699,16 @@ const CUSHION = [[-1, 0.02], [-0.92, 0.6], [-0.6, 0.88], [-0.1, 1], [0.3, 1], [0
 
 function equipment(mesh, g) {
   const color = C[g.kind];
-  const gloss = GLOSS[g.kind] ?? 0.1;
-  if (g.shape === 'rod') lathe(mesh, g.a, g.b, [[0, 0.01], [0, g.r], [1, g.r], [1, 0.01]], 12, color, gloss);
-  if (g.shape === 'head') lathe(mesh, g.a, g.b, [[0, 0.01], [0, g.r * 0.8], [0.18, g.r], [0.82, g.r], [1, g.r * 0.8], [1, 0.01]], 6, color, gloss);
+  const made = MADE[g.kind];
+  if (g.shape === 'rod') lathe(mesh, g.a, g.b, [[0, 0.01], [0, g.r], [1, g.r], [1, 0.01]], 12, color, made);
+  if (g.shape === 'head') lathe(mesh, g.a, g.b, [[0, 0.01], [0, g.r * 0.8], [0.18, g.r], [0.82, g.r], [1, g.r * 0.8], [1, 0.01]], 6, color, made);
   if (g.shape === 'disc') {
     const z = [0, 0, g.thick / 2];
     const R = g.radius;
-    lathe(mesh, sub(g.c, z), add(g.c, z), [[0.1, 0.01], [0.1, R * 0.2], [0.2, R * 0.22], [0.2, R * 0.7], [0, R * 0.76], [0, R * 0.96], [0.2, R], [0.8, R], [1, R * 0.96], [1, R * 0.76], [0.8, R * 0.7], [0.8, R * 0.22], [0.9, R * 0.2], [0.9, 0.01]], 40,
-      (rad) => (rad < R * 0.21 ? C.hub : color), gloss);
+    // Each edge twice, so it stays sharp.
+    const face = [[0.1, 0.2], [0.3, 0.25], [0.3, 0.68], [0, 0.75], [0, 0.94], [0.16, 1]].flatMap(([at, r]) => [[at, r * R], [at, r * R]]);
+    lathe(mesh, sub(g.c, z), add(g.c, z), [[0.1, 0.01], ...face, ...face.map(([at, r]) => [1 - at, r]).reverse(), [0.9, 0.01]], 40,
+      (rad) => (rad < R * 0.21 ? C.hub : color), made);
   }
   if (g.shape === 'pad') {
     const t = unit(sub(g.b, g.a));
@@ -706,7 +719,7 @@ function equipment(mesh, g) {
       const edge = CUSHION[r][1];
       const [c, q] = [Math.cos(ang), Math.sin(ang)];
       return [Math.sign(c) * Math.abs(c) ** 0.35 * (g.z + R * (edge - 0.6)) * (edge < 0.1 ? 0.6 : 1), Math.sign(q) * Math.abs(q) ** 0.6 * R * edge, 0];
-    }, () => [color, gloss]);
+    }, () => [color, made]);
   }
 }
 
@@ -729,7 +742,7 @@ export function build(mesh, clip, j, t) {
 // The dotted path the hands (or feet) follow.
 export function dots(mesh, points) {
   begin(mesh);
-  for (const p of points) lathe(mesh, add(p, [0, -0.7, 0]), add(p, [0, 0.7, 0]), [[0, 0.01], [0.25, 0.6], [0.5, 0.7], [0.75, 0.6], [1, 0.01]], 8, C.dot, 0);
+  for (const p of points) lathe(mesh, add(p, [0, -0.7, 0]), add(p, [0, 0.7, 0]), [[0, 0.01], [0.25, 0.6], [0.5, 0.7], [0.75, 0.6], [1, 0.01]], 8, C.dot, M.plain);
   finish(mesh);
   return mesh;
 }

@@ -12,7 +12,7 @@ import { disc, dumbbells, pad, rod, sides } from './body.js';
 const hands = (j) => j.hand;
 const behind = (j, at, by) => add(j.spine[at], j.front[Math.min(at, 2)], -by);
 const onArc = (pivot, r, deg) => add(pivot, dir(deg), r);
-const floorSeat = (x, y) => [pad('pad', [x - 10, y], [x + 14, y], 11), rod('steel', [x, y - 3, 0], [x, 2, 0], 2.4)];
+const floorSeat = (x, y) => [pad('pad', [x - 10, y], [x + 14, y], 11), rod('steel', [x, y - 3, 0], [x, 0, 0], 2.4)];
 
 // Where the two straps of the crunch rope, each 28 long, meet the cable.
 const PULLEY = [146, 112, 0];
@@ -52,10 +52,10 @@ export const FORM = {
         pad('pad', behind(j, 0, 13), behind(j, 3, 12), 10),
         pad('pad', add(j.spine[0], [-7, -13, 0]), add(j.spine[0], [12, -15, 0]), 10),
         ...sides((s) => rod('steel', [100, 18, 19 * s], [172, 90, 19 * s], 1.4)),
-        ...sides((s) => rod('steel', [100, 18, 19 * s], [100, 3, 19 * s], 1.4)),
-        ...sides((s) => rod('steel', [168, 86, 19 * s], [168, 3, 19 * s], 1.4)),
-        rod('steel', [60, 3, 0], [168, 3, 0], 1.6),
-        ...sides((s) => rod('steel', [60, 3, 0], [56, 30, 6 * s], 1.4)),
+        ...sides((s) => rod('steel', [100, 18, 19 * s], [100, 0, 19 * s], 1.4)),
+        ...sides((s) => rod('steel', [168, 86, 19 * s], [168, 0, 19 * s], 1.4)),
+        rod('steel', [60, 1.6, 0], [168, 1.6, 0], 1.6),
+        ...sides((s) => rod('steel', [60, 1.6, 0], [56, 30, 6 * s], 1.4)),
         pad('steel', add(sole, j.toe, -14), add(sole, j.toe, 20), 15, 1.6),
         ...sides((s) => rod('steel', add(add(sole, j.toe, -12), [0, 0, 14 * s]), add(end, [0, 0, 14 * s]), 1.8)),
         rod('steel', add(end, [0, 0, -24]), add(end, [0, 0, 24]), 1.8),
@@ -89,10 +89,10 @@ export const FORM = {
     gear: (j, t) => [
       ...floorSeat(82, 28),
       pad('pad', behind(j, 0, 13), behind(j, 3, 13), 10),
-      rod('steel', [50, 2, 0], [50, 92, 0], 2.2),
+      rod('steel', [50, 0, 0], [50, 92, 0], 2.2),
       rod('steel', [50, 40, 0], [68, 40, 0], 2),
       rod('steel', [104, 5, -33], [104, 5, 33], 1.8),
-      rod('steel', [50, 3, 0], [104, 5, 0], 2),
+      rod('steel', [50, 2, 0], [104, 2, 0], 2),
       ...sides((s) => rod('steel', [104, 6, 33 * s], [j.hand[0], j.hand[1], (j.hand[2] + 6) * s], 1.6)),
       ...sides((s) => rod('steel', [j.hand[0], j.hand[1], (j.hand[2] - 5) * s], [j.hand[0], j.hand[1], (j.hand[2] + 6) * s], 1.6)),
     ],
@@ -121,10 +121,10 @@ export const FORM = {
     track: hands,
     gear: (j, t) => [
       pad('pad', [56, 19], [92, 19], 10),
-      rod('steel', [60, 16, 0], [60, 2, 0], 2.4),
+      rod('steel', [60, 16, 0], [60, 0, 0], 2.4),
       rod('steel', [90, 16, 0], [158, 12, 0], 2.4),
       pad('steel', add([j.ankle[0], j.ankle[1], 0], add(j.sole, j.toe, -0.6), 6), add(add([j.ankle[0], j.ankle[1], 0], j.sole, 6.4), j.toe, 13), 15, 1.4),
-      rod('steel', [160, 2, 0], [160, 72, 0], 2.2),
+      rod('steel', [160, 0, 0], [160, 72, 0], 2.2),
       rod('cable', [j.hand[0] + 7, j.hand[1], 0], [160, 52, 0], 0.7),
       ...sides((s) => rod('steel', [j.hand[0] + 7, j.hand[1], 0], [j.hand[0], j.hand[1], j.hand[2] * s], 1.3)),
     ],
@@ -185,7 +185,7 @@ export const FORM = {
       const knot = ropeKnot(j.hand);
       return [
         pad('pad', [58, 0], [112, 0], 18, 1.4),
-        rod('steel', [158, 2, 0], [158, 116, 0], 2.2),
+        rod('steel', [158, 0, 0], [158, 116, 0], 2.2),
         rod('steel', [158, 114, 0], [146, 114, 0], 1.8),
         rod('cable', knot, PULLEY, 0.7),
         ...sides((s) => rod('rope', knot, [j.hand[0], j.hand[1], j.hand[2] * s], 1.3)),
@@ -248,7 +248,7 @@ export const FORM = {
     track: hands,
     gear: (j, t) => [
       ...floorSeat(82, 28),
-      rod('steel', [134, 2, 0], [134, 142, 0], 2.2),
+      rod('steel', [134, 0, 0], [134, 142, 0], 2.2),
       rod('steel', [134, 140, 0], [86, 140, 0], 2),
       rod('steel', [134, 49, 0], [100, 49, 0], 1.8),
       rod('pad', [100, 49, -15], [100, 49, 15], 4),
@@ -280,8 +280,8 @@ export const FORM = {
     gear: (j) => [
       pad('pad', behind(j, 0, 12), add(behind(j, 3, 11), dir(-60), 16), 9),
       pad('pad', [92, 16], [112, 18], 9),
-      rod('steel', [98, 13, 0], [104, 2, 0], 2.2),
-      rod('steel', [66, 26, 0], [56, 2, 0], 2.2),
+      rod('steel', [98, 13, 0], [104, 0, 0], 2.2),
+      rod('steel', [66, 26, 0], [56, 0, 0], 2.2),
       rod('steel', [52, 2, 0], [112, 2, 0], 2),
       ...dumbbells(j.hand),
     ],
@@ -319,9 +319,9 @@ export const FORM = {
       return [
         pad('pad', [76, 36], [97, 39], 13),
         pad('pad', [101, 38], [146, 27], 11),
-        rod('steel', [90, 35, 0], [90, 3, 0], 2.2),
-        rod('steel', [128, 29, 0], [128, 3, 0], 2.2),
-        rod('steel', [76, 3, 0], [148, 3, 0], 1.8),
+        rod('steel', [90, 35, 0], [90, 0, 0], 2.2),
+        rod('steel', [128, 29, 0], [128, 0, 0], 2.2),
+        rod('steel', [76, 1.8, 0], [148, 1.8, 0], 1.8),
         ...sides((s) => rod('steel', [140, 20, 12 * s], [148, 21, 22 * s], 1.3)),
         ...sides((s) => rod('steel', [pivot[0], pivot[1], 18 * s], [roller[0], roller[1], 18 * s], 1.4)),
         rod('steel', [roller[0], roller[1], -18], [roller[0], roller[1], 18], 1.4),
