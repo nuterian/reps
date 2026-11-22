@@ -1,0 +1,14 @@
+{
+  "name": "reps",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node scripts/e2e.js",
+    "icons": "node scripts/icons.js"
+  },
+  "devDependencies": {
+    "playwright": "1.62.0"
+  }
+}
