@@ -138,3 +138,9 @@ In `src/build.js`, covered by `test/build.test.js`. The user picks exercises the
 ## Not verifiable from the Mac
 
 Add to Home Screen, status bar and safe-area fit, the share sheet used by Export backup, and how it feels mid-workout all need a real iPhone.
+
+## Polish run 2026-11-21 (branch polish/2026-11-21, from f89232e)
+
+Focus: the 3D model, materials and motion clips. At most 3 iterations.
+
+1. Kept: a paused clip no longer has a play disc over the middle of the figure. The disc is smaller and sits in the bottom right corner, so pausing and turning to study a position works. Found by a character artist who lifts, all ten clips, after a tap to pause. Proof: an end-to-end check on where the disc is (old: 64 px at 163, 180; it failed there), and screenshots in light, dark and at 320 px. Limit, measured by the review: on the starting angle it is clear of the figure in all ten clips from 375 px up; at 320 px it touches a shoe toe (Incline Press) and a machine post (Cable Crunch). Turned, Seated Row's post can pass behind it.

@@ -246,8 +246,8 @@ button:disabled { opacity: 0.32; cursor: default; }
 .say .track i { display: block; height: 100%; border-radius: 3px; background: var(--blue-edge); transform-origin: left; transform: scaleX(0); }
 .say.lift .track i { background: var(--yellow-edge); }
 .turn { margin-top: 8px; font-size: 13px; color: var(--steel); }
-.play { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity 0.15s; }
-.play .icon { width: 64px; height: 64px; padding: 18px; border-radius: 50%; background: var(--yellow); color: var(--on-color); fill: currentColor; }
+.play { position: absolute; right: 0; bottom: 0; opacity: 0; transition: opacity 0.15s; }
+.play .icon { display: block; width: 44px; height: 44px; padding: 12px; border-radius: 50%; background: var(--yellow); color: var(--on-color); fill: currentColor; }
 .clip.paused .play { opacity: 1; }
 .stills { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .stills figure { margin: 0; text-align: center; }

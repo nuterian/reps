@@ -510,6 +510,9 @@ async function main() {
     await p.waitForTimeout(400);
     assert.equal(await picture(), still, 'and the picture stands still');
     const area = await clip.boundingBox();
+    const disc = await p.locator('.play .icon').boundingBox();
+    assert.ok(disc.x > area.x + area.width * 0.8 && disc.y > area.y + area.height * 0.8 && disc.width >= 40,
+      `the play sign sits in the bottom right corner: ${JSON.stringify(disc)}`);
     await p.mouse.move(area.x + 250, area.y + 150);
     await p.mouse.down();
     await p.mouse.move(area.x + 120, area.y + 155, { steps: 8 });
