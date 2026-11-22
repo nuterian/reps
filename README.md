@@ -6,7 +6,7 @@ It is a web app you add to the Home Screen. All data stays on the phone.
 
 ## Install on iPhone
 
-1. Open https://nuterian.github.io/reps/ in Safari.
+1. Open https://jugalm.com/reps/ in Safari.
 2. Tap Share, then Add to Home Screen.
 3. Open it from the Home Screen. It works offline after the first launch.
 
@@ -19,7 +19,7 @@ npm test           # rules and offline file list
 npm run test:e2e   # full run in WebKit and Chromium
 ```
 
-`BASE=https://nuterian.github.io/reps/ npm run test:e2e` runs the same checks against the deployed copy.
+`BASE=https://jugalm.com/reps/ npm run test:e2e` runs the same checks against the deployed copy.
 
 There is no build step. Pushing `main` deploys through GitHub Pages.
 
