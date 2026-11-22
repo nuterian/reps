@@ -47,7 +47,7 @@ export function solve(pose) {
   for (const a of angles) spine.push(add(spine[spine.length - 1], dir(a), BONE.spine));
   const top = angles[2];
   const front = angles.map((a) => dir(a + 90));
-  const shoulder = add(add(add(spine[3], front[2], reach), dir(top), lift - 2), [0, 0, SHOULDER_Z]);
+  const shoulder = add(add(add(spine[3], front[2], reach), dir(top), lift - 3.6), [0, 0, SHOULDER_Z]);
   const headUp = dir(top + (pose.head ?? 0));
   const head = add(spine[3], headUp, BONE.neck);
   const hip = add(spine[0], [0, 0, HIP_Z]);

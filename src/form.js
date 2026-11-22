@@ -68,7 +68,7 @@ export const FORM = {
       'Shoulders rolling forward, or elbows flaring up to shoulder height.',
     ],
     pose: (t) => {
-      const h = onArc([104, 6, 0], 63.6, mix(-12.7, 13.2, t));
+      const h = onArc([104, 6, 0], 62, mix(-13, 13.8, t));
       return {
         hip: [80, 40],
         torso: -6,
@@ -105,7 +105,7 @@ export const FORM = {
       hip: [70, 30],
       torso: mix(5, -4, t),
       reach: mix(4, -2, t),
-      hand: mix([121, 58, 5], [78, 50, 9], t),
+      hand: mix([120.9, 56.4, 5], [78, 48.4, 9], t),
       elbow: [-1, -0.2, 0.3],
       ankle: [131, 33, 9],
       knee: [0, 1, 0.1],
@@ -231,7 +231,7 @@ export const FORM = {
       torso: mix(-10, -20, t),
       lift: mix(8, 0, t),
       head: 8,
-      hand: mix([84, 125, 31], [80, 80, 30], t),
+      hand: mix([84, 123.6, 31], [80, 79, 30], t),
       elbow: [-0.8, -1, 0.3],
       ankle: [110, 5, 10],
       knee: [1, 0.3, 0.1],
@@ -262,7 +262,7 @@ export const FORM = {
       hip: [95, 28],
       torso: -60,
       head: 4,
-      hand: mix([68, 62, 34], [63, 92.5, 19], t),
+      hand: mix([69.4, 61.2, 34], [64.4, 91.7, 19], t),
       elbow: [0.4, -1, 0.6],
       ankle: [126, 5, 15],
       knee: [0.5, 1, 0.3],

@@ -183,3 +183,35 @@ test('a repetition loops: lift in 1.2 s, lower in 2.4 s, with the words in step'
   near(phase(rdl, 0.7 + 1.2).t, 0.5, 1e-9, 'a deadlift lowers first');
   for (const [id, f] of Object.entries(FORM)) assert.equal(f.say?.length, 2, `${id} says what to do`);
 });
+
+test('arms grow out of the chest, however high they reach', () => {
+  for (const [id, at] of Object.entries(meshes)) {
+    for (const t of [0, 0.5, 1]) {
+      const m = at(t);
+      const j = solve(FORM[id].pose(t));
+      // The arms are the parts with 22 points to a ring.
+      const sleeves = m.parts.filter((p) => p.cols === 22);
+      assert.equal(sleeves.length, 2, 'two arms');
+      for (const { base } of sleeves) {
+        const tip = [...m.v.slice(base * STRIDE, base * STRIDE + 3)];
+        const chest = Math.min(...[0, 0.25, 0.5, 0.75, 1].map((k) => dist(tip, mix(j.spine[2], j.spine[3], k))));
+        assert.ok(chest < 8, `${id} at ${t}: the arm starts ${chest.toFixed(1)} from the spine`);
+      }
+    }
+  }
+});
+
+test('no point of the body or the machine snaps from place to place', () => {
+  for (const [id, at] of Object.entries(meshes)) {
+    let before;
+    for (const t of TIMES) {
+      const m = at(t);
+      for (let i = 0; before && i < m.n; i++) {
+        const o = i * STRIDE;
+        const step = Math.hypot(m.v[o] - before[o], m.v[o + 1] - before[o + 1], m.v[o + 2] - before[o + 2]);
+        assert.ok(step < 6, `${id} at ${t}: a point moves ${step.toFixed(1)}`);
+      }
+      before = m.v.slice(0, m.n * STRIDE);
+    }
+  }
+});

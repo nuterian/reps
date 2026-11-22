@@ -140,59 +140,76 @@ function tint(base, mark, masks) {
 // --- limbs -----------------------------------------------------------------
 
 // A limb from a through joint j to b. u runs 0..1..2 along the two bones.
-// Angle 0 faces `way`, the outside of the bend. The far side is mirrored.
-function limb(mesh, a, j, b, way, us, cols, radius, paint) {
+// Angle 0 faces `way`, the outside of the bend. The far side is mirrored. An
+// arm also has a root inside the torso: there u runs on from 0 down to -1, so
+// the shoulder is one skin with the arm wherever the arm points.
+function limb(mesh, a, j, b, way, us, cols, radius, paint, root = null) {
   const d1 = unit(sub(j, a));
   const d2 = unit(sub(b, j));
   const l1 = len(sub(j, a));
   const l2 = len(sub(b, j));
-  let turn = unit(cross(d1, way));
-  // Angle 90 is always the side away from the body.
-  if (turn[2] * Math.sign(a[2]) < 0) turn = turn.map((x) => -x);
+  const d0 = root ? unit(sub(a, root)) : d1;
+  const l0 = root ? len(sub(a, root)) : l1;
+  // Around a joint the path rounds the corner from p to q.
+  const corner = (p, at, q, from, to, k) => [
+    [0, 1, 2].map((i) => (1 - k) ** 2 * p[i] + 2 * k * (1 - k) * at[i] + k * k * q[i]), unit(mix(from, to, k))];
   const W = 0.2;
-  const p0 = add(j, d1, -l1 * W);
-  const p1 = add(j, d2, l2 * W);
-  const face1 = square(way, d1);
-  const last = us.length - 1;
-  sweep(mesh, us, cols, (u) => {
-    let c, t;
-    if (u < 1 - W) [c, t] = [add(a, d1, l1 * u), d1];
-    else if (u > 1 + W) [c, t] = [add(j, d2, l2 * (u - 1)), d2];
-    else {
-      const k = (u - 1 + W) / (2 * W);
-      c = [0, 1, 2].map((i) => (1 - k) ** 2 * p0[i] + 2 * k * (1 - k) * j[i] + k * k * p1[i]);
-      t = unit(mix(d1, d2, k));
+  const R = root ? 0.75 : 0;
+  const path = (u) => {
+    if (root && u < 0.26) {
+      if (u < -R) return [add(a, d0, l0 * u), d0];
+      return corner(add(a, d0, -l0 * R), a, add(a, d1, l1 * 0.26), d0, d1, (u + R) / (0.26 + R));
     }
-    const face = cross(turn, t);
-    return [c, dot(face, face1) < 0 && u < 1 ? face.map((x) => -x) : face.map((x) => x * Math.sign(dot(cross(turn, d1), face1) || 1)), turn];
-  }, (u, angle, r) => {
+    if (u < 1 - W) return [add(a, d1, l1 * u), d1];
+    if (u > 1 + W) return [add(j, d2, l2 * (u - 1)), d2];
+    return corner(add(j, d1, -l1 * W), j, add(j, d2, l2 * W), d1, d2, (u - 1 + W) / (2 * W));
+  };
+  // Carry the ring's facing along the path without twisting, out from the
+  // middle of the first bone in both directions.
+  // The two sides are mirrored; the sense never flips during a rep.
+  const turn = unit(cross(d1, way)).map((x) => -x * Math.sign(a[2]));
+  const face = square(way, d1);
+  const start = us.findIndex((u) => u >= 0.3);
+  const rings = [];
+  for (const [from, to, by] of [[start, us.length, 1], [start - 1, -1, -1]]) {
+    let [f, t] = [face, turn];
+    for (let r = from; r !== to; r += by) {
+      const [c, d] = path(us[r]);
+      f = square(f, d);
+      t = square(sub(t, [f[0] * dot(t, f), f[1] * dot(t, f), f[2] * dot(t, f)]), d);
+      rings[r] = [c, f, t];
+    }
+  }
+  const last = us.length - 1;
+  sweep(mesh, us, cols, (u, r) => rings[r], (u, angle, r) => {
     const round = Math.min(1, Math.sqrt(Math.max(0, Math.min(u - us[0], us[last] - u)) / 0.1));
     const rad = r === 0 || r === last ? 0.01 : radius(u, angle, r) * round;
     return [Math.cos(angle) * rad, Math.sin(angle) * rad, 0];
   }, paint);
 }
 
-const armR = profile([[-0.22, 3.6], [0, 4.7], [0.18, 4.7], [0.5, 4.0], [0.86, 3.15], [1, 3.2], [1.22, 3.5], [1.55, 2.7], [1.86, 1.95], [2.1, 2.1]]);
+const armR = profile([[-1, 4.6], [-0.6, 4.8], [-0.25, 4.2], [0.1, 4.3], [0.25, 4.5], [0.5, 4.0], [0.86, 3.15], [1, 3.2], [1.22, 3.5], [1.55, 2.7], [1.86, 1.95], [2.1, 2.1]]);
 const legR = profile([[-0.22, 7], [0, 8], [0.18, 7.9], [0.5, 6.5], [0.86, 4.9], [1, 4.7], [1.15, 4.3], [1.4, 4.1], [1.72, 2.9], [1.92, 2.5], [2.1, 2.7]]);
 
 const ARM = {
-  shoulders: (u, a) => bump(u - 0.06, 0.27) * (0.6 + 0.4 * toward(a, Math.PI / 2, 1)),
+  shoulders: (u) => 0.85 * bump(Math.max(0, Math.abs(u + 0.05) - 0.22), 0.2),
   biceps: (u, a) => bump(u - 0.58, 0.26) * toward(a, Math.PI, 0.9),
   triceps: (u, a) => bump(u - 0.52, 0.3) * toward(a, 0, 0.9),
   forearms: (u) => bump(u - 1.25, 0.26),
 };
 const SLEEVE = 0.4;
-const ARM_U = hemmed(-0.2, 2.04, 36, [SLEEVE]);
+const ARM_U = hemmed(-1, 2.04, 44, [SLEEVE]);
 const masks = (set, u, a) => Object.fromEntries(Object.entries(set).map(([n, f]) => [n, f(u, a)]));
 
 function arms(mesh, j, mark) {
   // Rings before the hem are cloth; the doubled ring after it is skin.
   const cloth = (r) => r <= ARM_U.indexOf(SLEEVE);
-  const radius = (u, a, r) => armR(u)[0] + 0.8 * ARM.shoulders(u, a) + 0.9 * ARM.biceps(u, a) + 0.7 * ARM.triceps(u, a) + 0.35 * ARM.forearms(u) + (cloth(r) ? 0.5 : 0);
+  const radius = (u, a, r) => armR(u)[0] + 0.45 * ARM.shoulders(u, a) + 0.9 * ARM.biceps(u, a) + 0.7 * ARM.triceps(u, a) + 0.35 * ARM.forearms(u) + (cloth(r) ? 0.5 : 0);
   const paint = (u, a, r) => [tint(cloth(r) ? C.top : C.skin, mark, masks(ARM, u, a)), cloth(r) ? 0.03 : 0.12];
   const along = unit(sub(j.hand, j.elbow));
+  const root = add(mix(j.spine[3], j.spine[2], 0.5), [0, 0, 5]);
   for (const m of [(p) => p, flip]) {
-    limb(mesh, m(j.shoulder), m(j.elbow), m(add(j.hand, along, -1.2)), m(j.elbowWay), ARM_U, 22, radius, paint);
+    limb(mesh, m(j.shoulder), m(j.elbow), m(add(j.hand, along, -1.2)), m(j.elbowWay), ARM_U, 22, radius, paint, m(root));
     fist(mesh, m(j.hand), m(along), m(j.grip));
   }
 }
@@ -259,7 +276,7 @@ function shoe(mesh, ankle, toe, sole) {
 // front, depth to the back.
 const torsoR = profile([
   [-0.62, 3, 3, 3], [-0.45, 8, 5.6, 6], [-0.1, 11.6, 7.2, 8.8], [0.3, 11.5, 7.4, 8], [0.8, 10, 6.8, 6.6], [1.2, 9.9, 6.9, 6.6], [1.7, 11.1, 7.6, 7.4],
-  [2.2, 12.8, 8.2, 8], [2.6, 13.6, 7.4, 7.8], [2.86, 13.2, 5.8, 6.6], [3.0, 11.2, 4.8, 5.8], [3.1, 8.4, 4.5, 5.2], [3.24, 5.4, 4.2, 4.6], [3.45, 4.1, 3.9, 4.1], [3.9, 3.9, 3.8, 3.9], [4.1, 3.6, 3.4, 3.6],
+  [2.2, 12.8, 8.2, 8], [2.6, 12.6, 7.4, 7.8], [2.78, 12, 6.2, 7], [2.92, 10.6, 5.4, 6.3], [3.06, 8, 4.7, 5.5], [3.2, 5.8, 4.3, 4.9], [3.34, 4.5, 4.1, 4.3], [3.45, 4.1, 3.9, 4.1], [3.9, 3.9, 3.8, 3.9], [4.1, 3.6, 3.4, 3.6],
 ]);
 const TORSO = {
   chest: (u, a) => bump(u - 2.38, 0.38) * Math.max(toward(a, 0.55, 2), toward(a, -0.55, 2)),
@@ -270,7 +287,7 @@ const TORSO = {
   glutes: (u, a) => bump(u + 0.1, 0.38) * Math.max(toward(a, 2.6, 2), toward(a, -2.6, 2)),
 };
 const WAIST = 0.34;
-const COLLAR = 3.14;
+const COLLAR = 3.28;
 const TORSO_U = hemmed(-0.62, 4.1, 54, [WAIST, COLLAR]);
 
 function torso(mesh, j, mark) {
