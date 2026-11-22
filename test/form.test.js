@@ -100,7 +100,9 @@ test('the clips show what the steps say', () => {
     assert.ok(dot(sub(s.hand, s.elbow), [0, 1, 0]) / BONE.fore > 0.95, `${id} forearms start upright`);
   }
   near(at('db-shoulder-press', 0).hand[1], at('db-shoulder-press', 0).head[1], 5, 'dumbbells start at ear height');
-  // Row: elbows end behind the body, torso barely moves.
+  // Row: arms straight at the reach, elbows end behind the body.
+  const reach = at('seated-row', 0);
+  assert.ok(bendDeg(reach.shoulder, reach.elbow, reach.hand) > 160, `row reaches with arms at ${bendDeg(reach.shoulder, reach.elbow, reach.hand).toFixed(0)} degrees`);
   assert.ok(at('seated-row', 1).elbow[0] < at('seated-row', 1).spine[1][0] - 5, 'elbows end behind the spine');
   // Pulldown: the bar stays in front of the face and ends at the upper chest.
   for (const t of TIMES) {

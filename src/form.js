@@ -105,7 +105,7 @@ export const FORM = {
       hip: [70, 30],
       torso: mix(5, -4, t),
       reach: mix(4, -2, t),
-      hand: mix([116, 57, 5], [78, 50, 9], t),
+      hand: mix([121, 58, 5], [78, 50, 9], t),
       elbow: [-1, -0.2, 0.3],
       ankle: [131, 33, 9],
       knee: [0, 1, 0.1],
