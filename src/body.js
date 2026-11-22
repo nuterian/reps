@@ -144,7 +144,7 @@ const blend = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, 
 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
 const C = {
-  skin: hex('#cf9f7f'), hair: hex('#2b2320'), lips: hex('#b9796a'), white: hex('#f4f1ec'), iris: hex('#33241b'), top: hex('#525b6d'), shorts: hex('#262a33'), shoe: hex('#3a404b'), sole: hex('#f3f4f6'), sock: hex('#eceef2'),
+  skin: hex('#cf9f7f'), hair: hex('#2b2320'), lips: hex('#bd8170'), white: hex('#f0ebe6'), iris: hex('#3a281e'), top: hex('#525b6d'), shorts: hex('#262a33'), shoe: hex('#3a404b'), sole: hex('#f3f4f6'), sock: hex('#eceef2'),
   works: hex('#3f78ff'), helps: hex('#a9c4ff'),
   steel: hex('#b4bac5'), pad: hex('#697180'), load: hex('#ffdc55'), hub: hex('#9aa0ab'), cable: hex('#3a3f48'), rope: hex('#e8dcc0'), dot: hex('#3f78ff'),
 };
@@ -359,15 +359,15 @@ function skullRing(u) {
 function relief(y, z) {
   const s = Math.abs(z);
   const at = (py, pz, hy, hz) => bump(y - py, hy) * bump(s - pz, hz);
-  const bridge = easeIn(y, -4.1, -2.1) * easeIn(-y, -2.6, -0.2) * (0.6 + 1.3 * easeIn(-y, -0.6, 2.4));
-  return bridge * bump(z, 0.85 + 0.35 * easeIn(-y, 0, 2.4)) + 0.5 * at(-2.4, 0, 0.8, 0.8) // nose
-    + 0.5 * at(-2.7, 1.15, 0.55, 0.45) // nostrils
-    + 0.5 * at(2.3, 2.4, 0.8, 1.9) + 0.35 * at(2, 0, 0.8, 1) - 0.35 * at(0.75, 0, 0.6, 1) // brow
-    - 0.95 * at(0.7, 2.4, 1.1, 1.4) // eye sockets
-    + 0.5 * at(-1.4, 3.7, 1.4, 1.4) - 0.4 * at(-4.3, 4, 1.6, 1.1) // cheeks
-    + 0.4 * at(-4.9, 0, 1.5, 2.1) - 0.15 * at(-3.9, 0, 0.5, 0.35) // mouth
-    + 0.22 * at(-4.5, 0.45, 0.4, 1) + 0.35 * at(-5.4, 0, 0.45, 1.2) - 0.34 * at(-5 + 0.07 * z * z, 0, 0.19, 1.6) // lips
-    - 0.4 * at(-6.2, 0, 0.5, 1.3) + 0.6 * at(-7.4, 0, 0.9, 1.5); // chin
+  const bridge = easeIn(y, -4.3, -2.1) * easeIn(-y, -2.6, -0.2) * (0.55 + 1.15 * easeIn(-y, -0.6, 2.4));
+  return bridge * bump(z, 0.9 + 0.3 * easeIn(-y, 0, 2.4)) + 0.4 * at(-2.4, 0, 0.8, 0.8) // nose
+    + 0.3 * at(-2.7, 1, 0.65, 0.5) // nostrils
+    + 0.3 * at(2.3, 2.2, 1, 1.9) + 0.2 * at(2.1, 0, 0.9, 1.1) - 0.25 * at(0.8, 0, 0.7, 1.1) // brow
+    - 0.6 * at(0.7, 2.2, 1.3, 1.5) + 0.25 * at(0.4, 2.5, 0.6, 0.9) // eyes, set back under the brow
+    + 0.4 * at(-1.6, 3.6, 1.4, 1.4) - 0.2 * at(-4.3, 4, 1.6, 1.1) // cheeks
+    + 0.28 * at(-4.9, 0, 1.6, 2.2) - 0.12 * at(-3.9, 0, 0.5, 0.35) // mouth
+    + 0.16 * at(-4.5, 0.4, 0.4, 0.9) + 0.28 * at(-5.4, 0, 0.45, 1) - 0.28 * at(-4.97 + 0.03 * z * z, 0, 0.18, 1.3) // lips
+    - 0.3 * at(-6.2, 0, 0.5, 1.2) + 0.5 * at(-7.4, 0, 0.9, 1.5); // chin
 }
 // A point of the head, on the skull at ring u and angle a, pushed out by `out`.
 function skull(u, a, out = 0) {
@@ -389,8 +389,40 @@ function onFace(y, z) {
   const [x] = skull(u, find(0, 1.5, (m) => skull(u, m)[2] < z));
   return [x, y, z];
 }
-let brow; // worked out for the first clip, so launch does not pay for it
-const browLine = () => steps(0, 1, 9).map((k) => onFace(2.1 + 0.5 * Math.sin(k * 2.4), 1.05 + 2.8 * k));
+// What lies on the face, worked out for the first clip so launch does not pay
+// for it: rings of [x, y, z] from the middle of each patch to its edge.
+// An eye is an almond of white with an iris, almost flush with the skin.
+const EYE = { y: 0.45, z: 2.45, half: 1.15 };
+const almond = (z, up) => {
+  const k = Math.min(1, Math.abs(z) / EYE.half);
+  return (up ? 0.54 * (1 - k ** 2.4) : -0.4 * (1 - k ** 2)) + 0.06 * z;
+};
+function patch(cols, out, dome, point) {
+  // The last two rings close it behind.
+  return [0, 0.45, 0.75, 1, 1, -1].map((u) => Array.from({ length: cols }, (_, k) => {
+    const [z, y] = point(Math.max(0, u), (k / cols) * TAU);
+    const [x] = onFace(EYE.y + y, EYE.z + z);
+    if (u < 0) return [x - 0.3, EYE.y + y, EYE.z + z];
+    return [x + out + dome * (1 - u * u), EYE.y + y, EYE.z + z];
+  }));
+}
+let eyes;
+const drawEyes = () => ({
+  white: patch(18, 0.02, 0.08, (u, a) => {
+    const z = EYE.half * Math.cos(a);
+    return [u * z, 0.05 * (1 - u) + u * almond(z, Math.sin(a) > 0)];
+  }),
+  iris: patch(20, 0.095, 0.06, (u, a) => {
+    const z = 0.52 * u * Math.cos(a);
+    return [z, Math.min(almond(z, true), Math.max(almond(z, false), 0.1 + 0.52 * u * Math.sin(a)))];
+  }),
+  // The upper lashes: a thin dark line along the lid.
+  lash: steps(0, 1, 11).map((k) => {
+    const z = EYE.half * 1.06 * (2 * k - 1);
+    return onFace(EYE.y + almond(z, true) + 0.04, EYE.z + z);
+  }),
+  brow: steps(0, 1, 9).map((k) => onFace(2.25 + 0.25 * Math.sin(k * 2.9), 1.15 + 2.75 * k)),
+});
 
 // Rings and columns crowd toward the face, where the detail is.
 const FACE_U = [...steps(0, 1, 4), ...steps(1.4, 2.8, 4), ...steps(3.1, 5.6, 18), ...steps(5.8, 9.2, 17), ...steps(9.8, CROWN, 5)];
@@ -406,13 +438,6 @@ function head(mesh, j) {
   const front = [up[1], -up[0], 0];
   // Every part is fixed to the head: point(u, angle, r) is [x, y, z].
   const part = (us, cols, point, paint) => sweep(mesh, us, cols, () => [at, front, up, [0, 0, 1]], point, paint);
-  // A cap of a ball around `way`, out to `spread` from it.
-  const cap = (c, way, radius, spread, rows, paint) => {
-    const axis = unit(way);
-    const e1 = square([0, 0, 1], axis);
-    const e2 = cross(axis, e1);
-    part(steps(0, spread, rows), 14, (q, a) => add(add(add(c, axis, radius * Math.cos(q)), e1, radius * Math.sin(q) * Math.cos(a)), e2, radius * Math.sin(q) * Math.sin(a)), () => paint);
-  };
 
   part(FACE_U, 40, (u, a) => skull(u, faceward(a)), (u, a) => {
     const [x, y, z] = skull(u, faceward(a));
@@ -421,23 +446,23 @@ function head(mesh, j) {
   });
 
   for (const s of [1, -1]) {
-    const eye = [5.2, 0.5, 2.4 * s];
-    cap(eye, [1, 0, 0.12 * s], 1.15, 1.77, 6, [C.white, 0.4]);
-    cap(add(eye, [0.06, 0, 0]), [1, 0, 0.12 * s], 1.15, 0.64, 4, [C.iris, 0.6]);
-    cap(eye, [-0.4, 0.91, -0.1 * s], 1.28, 1.7, 8, [C.skin, 0.12]);
-    cap(eye, [-0.4, -0.92, 0.1 * s], 1.22, 1.37, 7, [C.skin, 0.12]);
-
-    // Brow.
-    part(steps(0, 1, 9), 8, (k, a, r) => {
-      const [x, y, z] = (brow ??= browLine())[r];
-      const thick = r % 8 ? Math.sqrt(Math.min(1, (1 - k) / 0.6, 0.3 + k / 0.3)) : 0.02;
-      const out = 0.16 * thick * Math.sin(a);
-      return [x + out, y + 0.34 * thick * Math.cos(a), (z + 0.35 * k * out) * s];
-    }, () => [C.hair, 0.05]);
+    eyes ??= drawEyes();
+    const onSide = ([x, y, z]) => [x, y, z * s];
+    const lay = (rings, paint) => part([...rings.keys()], rings[0].length, (u, a, r) => onSide(rings[r][Math.round((a / TAU) * rings[0].length)]), paint);
+    // A line along points of the face, thickest where full(k) is 1.
+    const line = (points, tall, deep, full, paint) => part(steps(0, 1, points.length), 8, (k, a, r) => {
+      const thick = r % (points.length - 1) ? full(k) : 0.02;
+      const [x, y, z] = points[r];
+      return onSide([x + deep * thick * Math.sin(a), y + tall * thick * Math.cos(a), z]);
+    }, () => paint);
+    // The white darkens under the lids, so the eye sits in the face.
+    lay(eyes.white, (u) => [blend(C.white, C.skin, 0.55 * easeIn(u, 1, 3)), 0.1]);
+    lay(eyes.iris, () => [C.iris, 0.06]);
+    line(eyes.lash, 0.1, 0.1, (k) => Math.sqrt(Math.sin(Math.PI * k)), [C.hair, 0]);
+    line(eyes.brow, 0.27, 0.11, (k) => Math.sqrt(Math.min(1, (1 - k) / 0.7, 0.4 + k / 0.3)), [blend(C.hair, C.skin, 0.2), 0]);
 
     // Ear: a thin shell inside a rim that curls round to the lobe.
     const shell = (a, r, lift) => [-1 + r * (Math.cos(a) * 1.25 - Math.sin(a) * 0.4), -0.4 + r * Math.sin(a) * 2.05, 5.1 + r * (0.55 - 0.65 * Math.cos(a)) + lift];
-    const onSide = ([x, y, z]) => [x, y, z * s];
     part([0, 1, 2, 3, 4], 14, (u, a) => onSide(shell(a, [0.02, 0.5, 0.95, 0.9, 0.02][u], [0.75, 0.3, -0.2, -0.6, -0.8][u])), () => [blend(C.skin, C.hair, 0.15), 0.05]);
     part(steps(0, 1, 16), 8, (k, a, r) => {
       const round = -0.5 + 5.2 * k;

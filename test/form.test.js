@@ -291,16 +291,26 @@ test('the head has a face, and the hair covers it', () => {
     const tone = (i) => m.v.subarray(i * STRIDE + 6, i * STRIDE + 9);
     const whites = Array.from({ length: m.n }, (_, i) => i).filter((i) => Math.min(...tone(i)) > 0.9 && dist(point(i), [5.2, 0.5, Math.sign(point(i)[2]) * 2.4]) < 1.4);
     assert.ok(whites.some((i) => point(i)[2] > 0) && whites.some((i) => point(i)[2] < 0), `${id}: two eyes`);
+    const darks = Array.from({ length: m.n }, (_, i) => i).filter((i) => Math.max(...tone(i)) < 0.25 && Math.abs(point(i)[1] - 0.5) < 0.3 && Math.abs(Math.abs(point(i)[2]) - 2.45) < 0.4 && point(i)[0] > 3);
+    assert.ok(darks.length > 20, `${id}: a dark middle in each`);
     // Light falls on the outside: no point of the head faces into it.
     for (const part of m.parts.slice(m.parts.indexOf(skin), m.parts.indexOf(hair) + 1)) {
-      const open = part.rows > 5 && part.rows < 9 && part.cols === 14; // eyeballs and lids are part of a ball
-      for (let i = part.base; !open && i < part.base + part.rows * part.cols; i++) {
+      for (let i = part.base; i < part.base + part.rows * part.cols; i++) {
         const r = Math.floor((i - part.base) / part.cols);
         if (part === hair && r < 2) continue; // the buried edge of an open shell
         if (part.rows > 15 && r > 1 && r < part.rows - 2) continue; // the ends are where it is hard to tell
         const o = i * STRIDE;
         const out = add(m.v.subarray(o, o + 3), m.v.subarray(o + 3, o + 6), 0.04);
         assert.ok(!inside(m, part, out), `${id}: part ${m.parts.indexOf(part)}, ring ${r} faces inward`);
+      }
+    }
+    // Eyes lie in the face: nothing around them stands off the skin.
+    for (const part of m.parts.slice(m.parts.indexOf(skin) + 1, m.parts.indexOf(hair))) {
+      for (let i = part.base; i < part.base + part.rows * part.cols; i++) {
+        const p = point(i);
+        if (p[0] < 3 || Math.abs(p[1] - 0.5) > 1.2) continue;
+        const off = Math.min(...points.map((q) => dist(p, q)));
+        assert.ok(off < 0.4, `${id}: part of an eye is ${off.toFixed(2)} off the face`);
       }
     }
     for (const [x, y, z] of points) {

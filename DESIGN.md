@@ -161,3 +161,9 @@ Needs your decision:
 - A modelled body instead of one built from tubes. Evidence: hips, armpits and face are where each look finds seams. Recommendation: not now. It needs a 3D file, a loader and skinning, and the app would no longer draw everything from code.
 
 Stopped: the limit of 3 iterations. 3 iterations, 3 kept, 0 dropped.
+
+## Polish run 2026-11-22 (branch polish/2026-11-22, from 0741f25)
+
+Focus, in the user's words: the face looks creepy, the eyeballs look like they are popping out; and the muscles should be drawn in muscle colour and shape instead of the blue material. At most 3 iterations. The user chose: anatomy red with fibres for working muscles, paler red for helping ones, and the dotted path kept, in grey.
+
+1. Kept: the eyes lie in the face instead of being balls with hoods in front of it, and the brows, sockets, nose and mouth are softer. Found by the user. Proof: the face test now says nothing in an eye is more than 0.4 off the skin (old: 1.01, it failed there), and renders from four sides in light and dark, lying and bent over. The review kept it; its notes on a raised, glossy iris and on a test exemption that skipped it are fixed. Known: each clip's framing moves by up to 4 px when the number of points in the figure changes, since it frames from every ninth point.
