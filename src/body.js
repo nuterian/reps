@@ -50,8 +50,9 @@ function tipNormal(v, ring, cols, [tx, ty, tz], [mx, my, mz]) {
 }
 
 // One part: rings of `cols` points, one for each u.
-// ring(u, r): [centre, axis 1, axis 2, axis 3] of a ring, worked out every time.
-// shape(u, angle, r): offsets along those axes, worked out once.
+// ring(u, r): [centre, axis 1, axis 2, axis 3, drift] of a ring, worked out every time.
+// shape(u, angle, r): offsets along those axes, and how much of the drift a
+// point takes, worked out once.
 // paint(u, angle, r): [colour, material], worked out once.
 // wound: its normals already point out; else each is turned from the middle of its ring.
 function sweep(mesh, us, cols, ring, shape, paint, wound) {
@@ -60,7 +61,7 @@ function sweep(mesh, us, cols, ring, shape, paint, wound) {
   const base = mesh.n;
   let part = mesh.parts[mesh.part++];
   if (!part) {
-    part = { base, rows, cols, off: new Float32Array(rows * cols * 3), at: new Float32Array(rows * 9) };
+    part = { base, rows, cols, off: new Float32Array(rows * cols * 3), at: new Float32Array(rows * 9), give: new Float32Array(rows * cols) };
     mesh.parts.push(part);
     let along = 0;
     let before;
@@ -70,8 +71,9 @@ function sweep(mesh, us, cols, ring, shape, paint, wound) {
       before = at;
       for (let k = 0; k < cols; k++) {
         const angle = (k / cols) * TAU;
-        const [x, y, z] = shape(u, angle, r);
+        const [x, y, z, give = 0] = shape(u, angle, r);
         part.off.set([x, y, z], (r * cols + k) * 3);
+        part.give[r * cols + k] = give;
         const [color, made] = paint(u, angle, r);
         // Where the grain of the material lies: on the part, so it moves with it.
         v.set([...color, made, x, y, z + along], (base + r * cols + k) * STRIDE + 6);
@@ -81,13 +83,13 @@ function sweep(mesh, us, cols, ring, shape, paint, wound) {
   const { off } = part;
   const mid = new Float32Array(rows * 3);
   for (let r = 0; r < rows; r++) {
-    const [c, x, y, z] = ring(us[r], r);
+    const [c, x, y, z, drift] = ring(us[r], r);
     part.at.set([...c, ...x, ...y], r * 9);
     for (let k = 0; k < cols; k++) {
       const f = (r * cols + k) * 3;
       const o = (base + r * cols + k) * STRIDE;
       for (let a = 0; a < 3; a++) {
-        const q = c[a] + x[a] * off[f] + y[a] * off[f + 1] + (z ? z[a] * off[f + 2] : 0);
+        const q = c[a] + x[a] * off[f] + y[a] * off[f + 1] + (z ? z[a] * off[f + 2] : 0) + (drift ? drift[a] * part.give[r * cols + k] : 0);
         v[o + a] = q;
         mid[r * 3 + a] += q / cols;
       }
@@ -347,7 +349,7 @@ function torso(mesh, j) {
     // A breath fills the ribs to the front and the sides, and the belly a little.
     const full = (j.life.breath - 0.5) * (0.045 * bump(u - 2.1, 0.7) + 0.03 * bump(u - 1, 0.5));
     const front = dir(lean + 90);
-    return [add(c, front, 7 * full), front.map((x) => x * (1 + full)), [0, 0, 1 + 0.6 * full]];
+    return [add(c, front, 7 * full), front.map((x) => x * (1 + full)), [0, 0, 1 + 0.6 * full], null, j.shrug];
   }, (u, a, r) => {
     if (r === 0 || r === TORSO_U.length - 1) return [0, 0, 0];
     const [w, f, b] = torsoR(u);
@@ -356,7 +358,9 @@ function torso(mesh, j) {
     const full = (Math.abs(ca) ** 2.5 + Math.abs(sa) ** 2.5) ** (-1 / 2.5);
     const swell = 1.2 * TORSO.chest(u, a) + 0.5 * TORSO.lats(u, a) + 1.2 * TORSO.glutes(u, a) + 0.3 * TORSO['upper back'](u, a)
       - 0.5 * bump(u - 1.6, 0.9) * toward(a, Math.PI, 20) + (shirt(r) ? 0.35 : shorts(r) ? 0.55 : 0);
-    return [ca * ((ca > 0 ? f : b) * full + swell), sa * (w * full + swell * 0.5), 0];
+    // The top of the shoulders goes where the shoulder joint goes, the neck does not.
+    const shrug = Math.abs(sa) ** 1.5 * bump(u - 2.78, u < 2.78 ? 0.5 : 0.4);
+    return [ca * ((ca > 0 ? f : b) * full + swell), sa * (w * full + swell * 0.5), 0, shrug];
   }, (u, a, r) => [shorts(r) ? C.shorts : shirt(r) ? C.top : C.skin, shorts(r) || shirt(r) ? M.cloth : M.skin]);
 }
 

@@ -322,6 +322,39 @@ test('skin and cloth join smoothly, and thighs do not cross', () => {
   }
 });
 
+test('the shoulders carry the shirt with them: up overhead, forward at a reach', () => {
+  // The top of the shoulder on the shirt, and the base of the neck, against the same clip with still shoulder blades.
+  const points = (id, t) => {
+    const pose = FORM[id].pose(t);
+    const j = solve(pose);
+    const m = build(createMesh(), FORM[id], j, t);
+    const still = build(createMesh(), FORM[id], { ...j, shrug: [0, 0, 0] }, t);
+    const torso = m.parts.find((p) => p.cols === 36 && !p.want);
+    const moved = (r, k) => {
+      const o = (torso.base + r * 36 + k) * STRIDE;
+      return [0, 1, 2].map((a) => m.v[o + a] - still.v[o + a]);
+    };
+    const up = dir(j.angles[2]);
+    const all = Array.from({ length: torso.rows * 36 }, (_, i) => moved(Math.floor(i / 36), i % 36));
+    return { top: Math.max(...all.map((d) => dot(d, up))), forward: Math.max(...all.map((d) => dot(d, j.front[2]))), low: Math.min(...all.map((d) => dot(d, up))), neck: Math.max(...Array.from({ length: 36 }, (_, k) => len(moved(45, k)))), // the first skin above the collar
+      middle: Math.max(...[0, 18].flatMap((k) => Array.from({ length: torso.rows }, (_, r) => len(moved(r, k))))),
+      uneven: Math.max(...Array.from({ length: torso.rows }, (_, r) => Math.abs(dot(moved(r, 9), up) - dot(moved(r, 27), up)))),
+      shelf: Math.max(...Array.from({ length: torso.rows - 1 }, (_, r) => Math.abs(dot(moved(r, 9), up) - dot(moved(r + 1, 9), up)))), j, lift: pose.lift ?? 0 };
+  };
+  for (const [id, t] of [['db-shoulder-press', 1], ['lat-pulldown', 0]]) {
+    const p = points(id, t);
+    assert.ok(p.top > 3 && p.top < p.lift, `${id}: the shirt rises ${p.top.toFixed(1)} with a shoulder that rises ${p.lift}`);
+    assert.ok(p.low > -0.5 && p.neck < 1.2 && p.middle < 0.8, `${id}: the neck and the middle stay: ${p.neck}, ${p.middle}`);
+    assert.ok(p.uneven < 0.1 && p.shelf < 1.2, `${id}: both sides alike, with no shelf: ${p.uneven}, ${p.shelf}`);
+  }
+  const rest = points('db-shoulder-press', 0);
+  assert.ok(Math.abs(rest.top) < 0.5, 'and not with the arms low');
+  assert.ok(points('seated-row', 0).forward > 1.5, 'forward at the reach of the row');
+  // Overhead the joint rises and comes in, as a shoulder blade turns.
+  const [low, high] = [0, 1].map((t) => solve(FORM['db-shoulder-press'].pose(t)).shoulder);
+  assert.ok(high[1] - low[1] > 5 && low[2] - high[2] > 0.8, 'the shoulder joint goes up and in');
+});
+
 test('no point of the body or the machine snaps from place to place', () => {
   for (const [id, at] of Object.entries(meshes)) {
     let before;

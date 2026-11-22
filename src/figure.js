@@ -49,7 +49,9 @@ export function solve(pose, life = STILL) {
   for (const a of angles) spine.push(add(spine[spine.length - 1], dir(a), BONE.spine));
   const top = angles[2];
   const front = angles.map((a) => dir(a + 90));
-  const shoulder = add(add(add(spine[3], front[2], reach), dir(top), lift - 3.6), [0, 0, SHOULDER_Z]);
+  const shoulder = add(add(add(spine[3], front[2], reach), dir(top), lift - 3.6), [0, 0, SHOULDER_Z - 0.2 * lift]);
+  // How far the shoulder blades carry the shirt and the muscles over them.
+  const shrug = add(add([0, 0, 0], dir(top), 0.6 * lift), front[2], 0.6 * reach);
   const headUp = dir(top + turn);
   const head = add(spine[3], headUp, BONE.neck);
   const hip = add(spine[0], [0, 0, HIP_Z]);
@@ -57,7 +59,7 @@ export function solve(pose, life = STILL) {
   const grip = typeof pose.grip === 'function' ? pose.grip({ hand }) : pose.grip ?? [0, 0, 1];
   const elbowWay = typeof pose.elbow === 'function' ? pose.elbow({ shoulder, hand, headUp }) : pose.elbow;
   return {
-    spine, angles, front, head, headUp, headTurn: turn, shoulder, hip, hand, life,
+    spine, angles, front, head, headUp, headTurn: turn, shoulder, shrug, hip, hand, life,
     grip: unit(grip),
     ankle: pose.ankle,
     elbow: bend(shoulder, hand, BONE.upper, BONE.fore, elbowWay),
