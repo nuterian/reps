@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { habits, habitText, weekPlan, weekText, catchUp, pickShort, forecast, swapCounts } from '../src/smart.js';
+import { habits, habitText, weekPlan, weekText, catchUp, pickShort, forecast, gain, backupDue, swapCounts } from '../src/smart.js';
 import { family } from '../src/build.js';
 import { EXERCISES, ROUTINES } from '../src/seed.js';
 
@@ -141,4 +141,28 @@ test('swap counts: how often each exercise stood in for another', () => {
   ];
   assert.deepEqual([...swapCounts(sessions, 'rdl')], [['db-rdl', 2], ['back-extension', 1]]);
   assert.equal(swapCounts(sessions, 'chest-press').size, 0);
+});
+
+test('gain: first session to latest, once there is enough and it is not long ago', () => {
+  const at = (day, w, r) => ({ t: oct(day), w, r });
+  const up = [at(5, 40, 10), at(12, 45, 8), at(19, 50, 10)];
+  const g = gain(up, oct(20));
+  assert.deepEqual([g.from.w, g.to.w, g.sessions], [40, 50, 3]);
+  assert.equal(g.ratio, 1.25);
+  assert.equal(gain([up[0], up[2]], oct(20)), null, 'two sessions are too few');
+  assert.equal(gain([at(5, 40, 10), at(7, 45, 8), at(18, 50, 10)], oct(20)), null, 'thirteen days are too short');
+  assert.equal(gain(up, oct(19) + 84 * DAY).to.w, 50, 'still there after 12 weeks to the day');
+  assert.equal(gain(up, oct(19) + 85 * DAY), null, 'gone after that');
+  assert.ok(gain([at(5, 50, 10), at(12, 50, 10), at(19, 45, 10)], oct(20)).ratio < 1, 'a step back is told');
+  assert.ok(gain([at(5, 40, 10), at(12, 40, 10), at(19, 40, 12)], oct(20)).ratio > 1, 'more reps at the same weight count');
+  assert.equal(gain([at(5, null, 10), at(12, null, 12), at(19, null, 15)], oct(20)).ratio, 1.5, 'without weight, reps');
+});
+
+test('backup: due a month after the last one, or after the first session, if something was logged since', () => {
+  const due = (o) => backupDue({ first: nov(1), last: nov(28), now: nov(30), ...o });
+  assert.equal(due({}), null, '29 days after the first session');
+  assert.equal(due({ now: nov(31) }), 30, 'never backed up, 30 days in');
+  assert.equal(due({ now: nov(31), backedUp: nov(20) }), null, 'backed up lately');
+  assert.equal(due({ now: nov(60), last: nov(58), backedUp: nov(20) }), 40, 'a month after the last backup');
+  assert.equal(due({ now: nov(60), backedUp: nov(29) }), null, 'nothing logged since');
 });

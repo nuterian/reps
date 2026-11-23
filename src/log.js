@@ -4,7 +4,7 @@ import { state, saveSession, deleteSession } from './store.js';
 import { suggest, perf, compare, nextRoutine, weekStart } from './progression.js';
 import { toDisplay, toKg, stepFor, fmt } from './units.js';
 import { family } from './build.js';
-import { habits, weekPlan, catchUp, pickShort, forecast } from './smart.js';
+import { habits, weekPlan, catchUp, pickShort, forecast, gain, backupDue } from './smart.js';
 
 export const unit = () => state.settings.unit;
 export const kindOf = (ex) => (ex.equip === 'cardio' ? 'time' : ex.equip === 'bodyweight' ? 'reps' : 'weight');
@@ -160,13 +160,37 @@ export function shortItems(routine) {
   }));
 }
 
+// The working weight and first-set reps of the last sessions of an exercise, oldest first.
+const points = (exId, limit) => historyFor(exId, Infinity, limit).reverse().map((h) => {
+  const p = perf(h.sets);
+  return { t: h.date, w: p.w, r: p.reps[0] };
+});
+
+// Every exercise with enough history, the one that has come furthest first.
+export function gains(now = Date.now()) {
+  const done = new Set(finished().flatMap((s) => s.entries.map((e) => e.ex)));
+  return [...done].flatMap((id) => {
+    const g = gain(points(id, Infinity), now);
+    return g ? [{ ex: state.exercises.get(id), ...g }] : [];
+  }).sort((a, b) => b.ratio - a.ratio);
+}
+
+// "30 to 40 kg", "40 kg, 10 to 12 reps" or "10 to 12 reps".
+export function gainText({ from, to }) {
+  const span = (a, b) => (a === b ? fmt(b) : `${fmt(a)} to ${fmt(b)}`);
+  if (to.w == null) return `${span(from.r, to.r)} reps`;
+  return from.w === to.w ? `${fmt(to.w)} ${unit()}, ${span(from.r, to.r)} reps` : `${span(from.w, to.w)} ${unit()}`;
+}
+
+// Days without a backup when it is time to make one, else null.
+export function backupDays(now = Date.now()) {
+  const all = finished();
+  return all.length ? backupDue({ first: all[0].start, last: all[all.length - 1].end, backedUp: state.settings.backedUp, now }) : null;
+}
+
 // "On pace for 45 kg around 3 Dec." from the trend of one exercise.
 export function paceText(exId, now = Date.now()) {
-  const points = historyFor(exId, Infinity, 8).reverse().map((h) => {
-    const p = perf(h.sets);
-    return { t: h.date, w: p.w, r: p.reps[0] };
-  });
-  const f = forecast(points, { round: unit() === 'lb' ? 10 : 5, now });
+  const f = forecast(points(exId, 8), { round: unit() === 'lb' ? 10 : 5, now });
   if (!f) return null;
   const day = (t) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   if (!f.rising) return `No upward trend over the last ${f.sessions} sessions.`;

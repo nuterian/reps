@@ -113,6 +113,7 @@ export const exportData = () => ({
 export function importData(data) {
   const ok = data?.app === 'reps' && [data.exercises, data.routines, data.sessions].every(Array.isArray) && data.settings;
   if (!ok) throw new Error('This is not a Reps backup file.');
-  replace(data);
+  // What is in the file is safe in the file, from the day it was made.
+  replace({ ...data, settings: { ...data.settings, backedUp: Date.parse(data.exported) || data.settings.backedUp } });
   read();
 }

@@ -112,10 +112,14 @@ export function transition(fn) {
   document.startViewTransition(fn).ready.catch(() => {});
 }
 
-// A bottom sheet. Tap outside to close.
+// A bottom sheet. The cross closes it, and so does a tap outside.
 export function sheet(title, ...body) {
   // Focus lands on the heading so a search field does not raise the keyboard.
-  const d = h('dialog.sheet', h('div.sheet-body', h('h2', { tabindex: '-1', autofocus: true }, title), ...body));
+  const d = h('dialog.sheet', h('div.sheet-body',
+    h('div.sheet-head',
+      h('h2', { tabindex: '-1', autofocus: true }, title),
+      h('button.icon-btn', { 'aria-label': 'Close', onclick: () => d.close() }, icon('x'))),
+    ...body));
   d.addEventListener('click', (e) => e.target === d && d.close());
   d.addEventListener('close', () => d.remove());
   document.body.append(d);

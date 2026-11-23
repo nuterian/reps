@@ -4,8 +4,8 @@ import { h, icon, go, redirect, sheet, fmtDate, topbar } from '../dom.js';
 import { state, saveRoutine } from '../store.js';
 import { MUSCLES, EQUIPMENT } from '../seed.js';
 import { historyFor, bestSet, paceText, setsText } from '../log.js';
-import { formGuide, videoSearch } from './clip.js';
-import { nums } from './parts.js';
+import { formGuide, hasGuide, videoSearch } from './clip.js';
+import { nums, setupLine } from './parts.js';
 
 const filter = { query: '', muscle: null, equip: null };
 let scroll = 0; // where the list was when an exercise was opened
@@ -42,6 +42,7 @@ export function explore() {
           h('span.entry-main',
             h('span.name', x.name),
             h('span.sub', [x.equip, x.custom && 'custom', x.hidden && 'hidden'].filter(Boolean).join(', '))),
+          hasGuide(x) && h('span.has-clip', { role: 'img', 'aria-label': 'has a form clip' }, icon('play')),
           icon('next')))))];
     }));
     if (!found.length) list.replaceChildren(h('p.note', 'No exercise matches. Clear a filter, or add your own.'));
@@ -78,6 +79,7 @@ export function exercisePage(id) {
   return h('main.exercise',
     topbar('#/library', ex.name, h('a.chip', { href: `#/exercise/${id}/edit` }, 'Edit')),
     formGuide(ex) ?? (ex.cue && h('p.aim', ex.cue)),
+    ex.equip !== 'cardio' && setupLine(ex),
     h('h3', 'Your history'),
     ex.equip === 'cardio' ? cardioHistory(id) : liftHistory(id),
     h('div.tools.end', videoSearch(ex, 'More on YouTube')),

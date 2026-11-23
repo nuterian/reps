@@ -138,6 +138,24 @@ export function forecast(points, { round, now }) {
   return out;
 }
 
+// How far an exercise has come, from its first session to its latest. points:
+// as for forecast, w null without weight. Says nothing on less than 3 sessions
+// over two weeks, nor on an exercise not done for 12 weeks. ratio is the
+// estimated strength now against then.
+export function gain(points, now) {
+  const [from, to] = [points[0], points[points.length - 1]];
+  if (points.length < 3 || to.t - from.t < 14 * DAY || now - to.t > 84 * DAY) return null;
+  const strength = (p) => (p.w ? p.w * (1 + p.r / 30) : p.r);
+  return { from, to, sessions: points.length, ratio: strength(to) / strength(from) };
+}
+
+// Days since the last backup (or since the first session without one) once
+// that is 30 or more and something was logged since, else null.
+export function backupDue({ first, last, backedUp, now }) {
+  const days = Math.floor((now - (backedUp ?? first)) / DAY);
+  return days >= 30 && last > (backedUp ?? 0) ? days : null;
+}
+
 // How often each exercise was swapped in for `from`: Map of id -> count.
 export function swapCounts(sessions, from) {
   const counts = new Map();

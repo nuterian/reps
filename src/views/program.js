@@ -1,11 +1,12 @@
 // Everything behind "Program": routines, the form to edit an exercise,
 // settings and backup.
 import { h, icon, go, back, up, replace, redirect, boot, refresh, stepper, topbar } from '../dom.js';
-import { state, saveRoutine, deleteRoutine, saveExercise, saveSettings, exportData, importData, usedMB } from '../store.js';
+import { state, saveRoutine, deleteRoutine, saveExercise, saveSettings, importData, usedMB } from '../store.js';
 import { MUSCLES, EQUIPMENT } from '../seed.js';
 import { stepFor } from '../units.js';
 import { unit } from '../log.js';
 import { pickExercise } from './picker.js';
+import { saveBackup } from './parts.js';
 
 let notice = ''; // last backup result, shown under the backup buttons
 
@@ -26,19 +27,8 @@ export function program() {
     refresh(false);
   };
   const exportBackup = async () => {
-    const name = `reps-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    const file = new File([JSON.stringify(exportData())], name, { type: 'application/json' });
-    if (navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file] });
-        say('Backup shared.');
-      } catch { /* share sheet dismissed */ }
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    h('a', { href: url, download: name }).click();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-    say(`Saved ${name}.`);
+    const said = await saveBackup();
+    if (said) say(said);
   };
   const importBackup = async (e) => {
     const file = e.target.files[0];

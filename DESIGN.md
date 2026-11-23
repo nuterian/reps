@@ -25,6 +25,8 @@ Three things broke consistency before: no plan at the gym, logging was a chore, 
 | Swap | One tap to an exercise with the same movement, for today or for good. |
 | Rest | A quiet counter of time since the last set. No alarm. |
 | Form help | A drawn clip, three steps and the muscles worked, stored in the app. The ten starter exercises have one; the rest show a one-line cue and a YouTube search. |
+| Setup | One line per exercise for what to set on the machine (seat, pin, grip), typed and shown while logging. Kept with the exercise, as `setup`. |
+| Backup | Export and import in Program. Once 30 days have passed since the last backup (or the first session), the summary of the latest session offers one. `settings.backedUp` is set when the share sheet or the download went through. |
 | Cardio | One optional line per session: type and minutes. |
 | Layout | One home screen. Past, Exercises and Program behind three buttons. No tab bar. |
 | Logging | Read on top, act at the bottom. The plan scrolls; a fixed deck holds weight, reps and Done, so Done never moves. |
@@ -77,6 +79,7 @@ In `src/smart.js`, covered by `test/smart.test.js`. All deterministic and on the
 - **15 minutes.** Always available: the core exercise closest to a weight increase and the closest one from a different family, two sets each. Counts as a session and moves the rotation.
 - **Forecast.** In the summary: the next round weights with a date. Strength is estimated as weight x (1 + reps / 30) from the first set, fitted with a straight line over the last 8 sessions of the exercise. Needs 4 sessions. It looks at most twice as far ahead as the history it is built on, never past half a year. A flat or falling trend is stated plainly; a rising trend with no goal in range says nothing.
 - **Habits.** From the last 12 weeks, once there are 6 sessions: a weekday is usual with at least 3 sessions and a fifth of the total; a time of day with six in ten. No notifications, since a web app on iPhone cannot send them without a server.
+- **Strength.** Past opens with how far each exercise has come: working weight, or first-set reps at the same weight, from its first session to its latest. Needs 3 sessions over two weeks, and one in the last 12. The one whose estimated strength grew most comes first; standing still or falling back is said plainly. Text only, no charts.
 - **Usual swap.** The swap sheet lists what the user swapped to before first, and labels it after two swaps.
 
 Not built, by the user's choice: adjusting the rest of an exercise from the first set.

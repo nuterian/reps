@@ -416,6 +416,15 @@ async function main() {
       'the app has learned the usual days and time');
     if (SHOTS) await p.screenshot({ path: `${SHOTS}/23-home-habits.png` });
     await p.getByRole('link', { name: 'Past', exact: true }).click();
+    const strong = p.locator('.gains li');
+    await see(p.locator('h3').first(), 'Strengthfirst session to latest', 'Past opens with strength');
+    assert.equal(await strong.count(), 2, 'every exercise with enough history');
+    await see(strong.nth(0), 'Leg Press30 to 40 kg since Oct+10 kg', 'the one that has come furthest first');
+    await see(strong.nth(1), 'Close-Grip Pulldown30 kg, 10 reps since Octsame', 'and no change is said plainly');
+    if (SHOTS) await p.screenshot({ path: `${SHOTS}/26-past-strength.png` });
+    await strong.nth(0).locator('a').click();
+    await see(p.locator('.bar h1'), 'Leg Press', 'it leads to the exercise');
+    await p.locator('.back').click();
     await p.locator('.list a', { hasText: 'Routine A' }).first().click();
     const pace = (await p.locator('.pace').textContent()).trim();
     assert.match(pace, /^On pace for 45 kg around .+, 50 kg around .+\.$/, `forecast from six sessions, got: ${pace}`);
@@ -427,6 +436,59 @@ async function main() {
     await p.getByRole('button', { name: 'Swap' }).click();
     await see(p.locator('.sheet .pick').first(), 'Close-Grip Pulldownyour usual swap', 'the usual swap is offered first');
     if (SHOTS) await p.screenshot({ path: `${SHOTS}/25-usual-swap.png` });
+    await ctx.close();
+  }
+
+  // A month without a backup: the summary of the latest session offers one.
+  {
+    const old = JSON.parse(await readFile(`${tmp}/seeded.json`, 'utf8'));
+    delete old.exported;
+    delete old.settings.backedUp;
+    const oldFile = `${tmp}/old.json`;
+    await writeFile(oldFile, JSON.stringify(old));
+    const ctx = await browser.newContext(phone);
+    await ctx.clock.setFixedTime(new Date(2026, 10, 3, 18));
+    const p = await ctx.newPage();
+    watch(p);
+    const btn = (name) => p.getByRole('button', { name, exact: true });
+    const train = async (month, day) => {
+      await ctx.clock.setFixedTime(new Date(2026, month, day, 18));
+      await p.goto(`${base}#/`);
+      await p.reload();
+      await btn('15 minutes').click();
+      await btn('Start 15 minutes').click();
+      if (await p.getByLabel('weight', { exact: true }).inputValue() === '') await p.getByLabel('weight', { exact: true }).fill('20');
+      await btn('Done').click();
+      await btn('Finish').click();
+      await p.locator('.results').waitFor();
+    };
+    await p.goto(`${base}#/program`);
+    await p.locator('input[type=file]').setInputFiles(oldFile);
+    await p.locator('.notice').waitFor();
+    await train(10, 3);
+    assert.equal(await p.locator('.backup').count(), 0, '29 days after the first session there is no offer');
+    await train(10, 5);
+    await see(p.locator('.backup'), 'Your sessions are only on this phone.Back up', 'never backed up');
+    if (SHOTS) await p.screenshot({ path: `${SHOTS}/27-summary-backup.png` });
+    const spot = () => p.locator('.results').evaluate((el) => el.offsetTop);
+    const top = await spot();
+    await p.evaluate(() => { navigator.canShare = () => true; navigator.share = () => Promise.reject(new Error('dismissed')); });
+    await btn('Back up').click();
+    await see(p.locator('.backup'), 'Your sessions are only on this phone.Back up', 'a dismissed share sheet is not a backup');
+    await p.evaluate(() => { navigator.share = ({ files }) => { window.shared_ = files[0].name; return Promise.resolve(); }; });
+    await btn('Back up').click();
+    await see(p.locator('.backup'), 'Backup shared.', 'one tap');
+    assert.equal(await p.evaluate(() => window.shared_), 'reps-backup-2026-11-05.json', 'the file');
+    assert.equal(await spot(), top, 'nothing moves');
+    await p.reload();
+    await p.locator('.results').waitFor();
+    assert.equal(await p.locator('.backup').count(), 0, 'and it is not offered again');
+    await train(11, 6);
+    await see(p.locator('.backup'), 'Last backup 31 days ago.Back up', 'a month later it is');
+    await p.goto(`${base}#/past`);
+    await p.locator('.list:not(.gains) a').nth(1).click();
+    await p.locator('.results').waitFor();
+    assert.equal(await p.locator('.backup').count(), 0, 'not on an older session');
     await ctx.close();
   }
 
@@ -606,11 +668,52 @@ async function main() {
     await p.getByLabel('weight', { exact: true }).fill('42.5');
     await btn('Form').click();
     await p.locator('.sheet canvas').waitFor();
+    await btn('Close').click();
+    await p.locator('.sheet').waitFor({ state: 'detached' });
+    await btn('Form').click();
+    await p.locator('.sheet canvas').waitFor();
+    await p.setViewportSize({ width: 390, height: 520 });
+    assert.ok(await p.locator('.sheet-body').evaluate((el) => { el.scrollTo(0, 9999); return el.scrollTop > 50; }), 'a low screen scrolls the sheet');
+    assert.ok(await btn('Close').evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('button') === el && r.width >= 44 && r.height >= 44;
+    }), 'the cross stays in reach when the sheet is scrolled');
+    await p.setViewportSize(phone.viewport);
     await p.waitForTimeout(300);
     if (SHOTS) await p.screenshot({ path: `${SHOTS}/42-form-sheet.png` });
     await p.mouse.click(195, 30);
     await p.locator('.sheet').waitFor({ state: 'detached' });
     assert.equal(await p.getByLabel('weight', { exact: true }).inputValue(), '42.5', 'the set in progress is kept');
+
+    // What to set on the machine: typed once, there every time after.
+    const setup = p.getByLabel('Setup', { exact: true });
+    await setup.fill('Seat 4, pin 3');
+    await setup.press('Enter');
+    assert.equal(await p.getByLabel('weight', { exact: true }).inputValue(), '42.5', 'the set in progress is kept');
+    if (SHOTS) await p.screenshot({ path: `${SHOTS}/43-setup.png` });
+    await p.reload();
+    assert.equal(await setup.count(), 1, 'one line, on the open exercise');
+    await p.goto(`${base}#/exercise/lat-pulldown`);
+    await see(p.locator('.exercise .bar h1'), 'Lat Pulldown', 'the exercise page');
+    assert.equal(await setup.inputValue(), 'Seat 4, pin 3', 'it is on the exercise page');
+    await p.goto(`${base}#/exercise/lat-pulldown/edit`);
+    await btn('Save').click();
+    await see(p.locator('.exercise .bar h1'), 'Lat Pulldown', 'back on its page');
+    await p.goto(`${base}#/session`);
+    await p.locator('.row', { hasText: 'Lat Pulldown' }).click();
+    await see(p.locator('.row.open h2'), 'Lat Pulldown', 'the exercise opens');
+    assert.equal(await setup.inputValue(), 'Seat 4, pin 3', 'and survives an edit of the exercise');
+    await setup.fill('  ');
+    assert.equal(await p.evaluate(() => JSON.parse(localStorage.getItem('reps:exercises')).some((e) => 'setup' in e)), false, 'and can be cleared');
+    await p.goto(`${base}#/exercise/treadmill`);
+    await see(p.locator('.exercise .bar h1'), 'Treadmill Run', 'a cardio page');
+    assert.equal(await setup.count(), 0, 'not for cardio');
+
+    // The list says which exercises have a clip.
+    await p.goto(`${base}#/library`);
+    await p.locator('.search').waitFor();
+    assert.deepEqual((await p.locator('.list li:has(.has-clip) .name').allTextContents()).sort(), Object.keys(FORM).map((id) => EXERCISES.find((x) => x.id === id).name).sort(), 'the ones with a clip are marked');
+    if (SHOTS) await p.screenshot({ path: `${SHOTS}/44-clip-marks.png` });
     await ctx.close();
 
     // Reduce Motion: two stills, nothing moving.

@@ -8,7 +8,7 @@ import { unit, kindOf, doneSets, makeEntry, newCardio, finish, historyFor, setsT
 import { EQUIPMENT } from '../seed.js';
 import { swapCounts } from '../smart.js';
 import { pickExercise } from './picker.js';
-import { nums, statusMark } from './parts.js';
+import { nums, statusMark, setupLine } from './parts.js';
 import { formGuide, hasGuide, videoSearch } from './clip.js';
 
 let sid = null;    // session the state below belongs to
@@ -149,6 +149,7 @@ function openEntry(s, e, i, save, live) {
     e.kept && h('p.swap-note', `${e.kept} now uses this exercise.`),
     h('p.aim', e.reason),
     last && h('p.last', `Last time ${setsText(last.sets)}`),
+    setupLine(ex),
     h('div.cells', h('div.cellgrid', e.sets.map(cell)),
       h('div.setadj',
         h('button', { 'aria-label': 'Add a set', onclick: () => { e.sets.push({ w: lastSet.w, r: lastSet.r, done: false }); save(); refresh(false); } }, icon('plus')),

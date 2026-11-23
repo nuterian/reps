@@ -1,8 +1,8 @@
-import { h, back, up, redirect, fmtDate, topbar } from '../dom.js';
+import { h, icon, back, up, redirect, fmtDate, topbar } from '../dom.js';
 import { state, deleteSession } from '../store.js';
 import { weekStart } from '../progression.js';
-import { finished, review, planSets, deltaText } from '../log.js';
-import { nums } from './parts.js';
+import { finished, review, planSets, deltaText, backupDays } from '../log.js';
+import { nums, saveBackup } from './parts.js';
 
 export default function summary(id) {
   const s = state.sessions.find((x) => x.id === id && x.end);
@@ -33,6 +33,7 @@ export default function summary(id) {
     topbar('#/past', fmtDate(s.start)),
     h('h2.d.headline', head),
     h('p.sub-head', `${sub} ${s.name}, ${mins} min.`),
+    s === finished().at(-1) && backupLine(),
     h('ul.results',
       rows.map((r) => h('li',
         h('div.result-head',
@@ -52,4 +53,20 @@ export default function summary(id) {
     ),
     h('div.dock', h('a.btn.go', { href: '#/', onclick: (e) => { e.preventDefault(); up('/'); } }, 'Done')),
   );
+}
+
+// Once a month: the data is only on this phone, so offer to copy it.
+function backupLine() {
+  const days = backupDays();
+  if (days == null) return null;
+  const text = h('span', { role: 'status' }, state.settings.backedUp ? `Last backup ${days} days ago.` : 'Your sessions are only on this phone.');
+  const button = h('button.chip', {
+    onclick: async () => {
+      const said = await saveBackup();
+      if (!said) return;
+      text.textContent = said;
+      button.remove();
+    },
+  }, icon('out'), 'Back up');
+  return h('div.backup', text, button);
 }
